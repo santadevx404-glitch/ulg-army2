@@ -1,8 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { getCookie, setCookie, deleteCookie } from "@tanstack/react-start/server";
-import { promises as fs } from "node:fs";
-import path from "node:path";
 import crypto from "node:crypto";
+import { createClient } from "@supabase/supabase-js";
 
 import * as auth from "./local-auth.server";
 import * as store from "./local-store.server";
@@ -164,9 +163,21 @@ export const deleteTopicFn = createServerFn({ method: "POST" })
     return {};
   });
 
-// ==================== Uploads (على القرص المحلي، جوه public/uploads) ====================
+// ==================== Uploads (على Supabase Storage — bucket اسمه media) ====================
+// الإعداد المطلوب في Supabase: Storage -> Create bucket -> اسمه "media" -> Public bucket: ON.
 
-const UPLOAD_DIR = path.join(process.cwd(), "public", "uploads");
+let storageClient: ReturnType<typeof createClient> | null = null;
+function getStorageClient() {
+  if (!storageClient) {
+    const url = process.env.SUPABASE_URL;
+    const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    if (!url || !key) {
+      throw new Error("متغيرات SUPABASE_URL أو SUPABASE_SERVICE_ROLE_KEY مش موجودة على السيرفر.");
+    }
+    storageClient = createClient(url, key, { auth: { persistSession: false } });
+  }
+  return storageClient;
+}
 
 export const uploadFileFn = createServerFn({ method: "POST" })
   .validator((d: FormData) => d)
@@ -175,11 +186,16 @@ export const uploadFileFn = createServerFn({ method: "POST" })
     const file = data.get("file");
     if (!(file instanceof File)) throw new Error("لا يوجد ملف مرفوع");
 
-    await fs.mkdir(UPLOAD_DIR, { recursive: true });
     const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
     const filename = `${crypto.randomUUID()}-${safeName}`;
     const buffer = Buffer.from(await file.arrayBuffer());
-    await fs.writeFile(path.join(UPLOAD_DIR, filename), buffer);
 
-    return { url: `/uploads/${filename}` };
+    const supabase = getStorageClient();
+    const { error } = await supabase.storage.from("media").upload(filename, buffer, {
+      contentType: file.type || "application/octet-stream",
+    });
+    if (error) throw new Error(`فشل رفع الصورة: ${error.message}`);
+
+    const { data: pub } = supabase.storage.from("media").getPublicUrl(filename);
+    return { url: pub.publicUrl };
   });

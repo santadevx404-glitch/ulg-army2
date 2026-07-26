@@ -1,13 +1,10 @@
-// نظام حسابات محلي بالكامل (بدون Supabase وبدون أي خدمة خارجية).
-// الحسابات بتتحفظ في data/users.json، وأي حساب بيتعمل بيبقى مدير (admin)
-// تلقائيًا — لأن اللوحة دي مخصصة لصاحب/مطور الموقع بس.
-import { promises as fs } from "node:fs";
-import path from "node:path";
+// نظام حسابات محلي بالكامل. الحسابات بتتحفظ في Supabase (جدول app_kv)،
+// وأي حساب بيتعمل بيبقى مدير (admin) تلقائيًا — لأن اللوحة دي مخصصة لصاحب/مطور الموقع بس.
 import crypto from "node:crypto";
+import { kvGetJSON, kvSetJSON } from "./kv-store.server";
 
-const DATA_DIR = path.join(process.cwd(), "data");
-const USERS_FILE = path.join(DATA_DIR, "users.json");
-const SECRET_FILE = path.join(DATA_DIR, "session-secret.txt");
+const USERS_KEY = "bwd:users";
+const SECRET_KEY = "bwd:session-secret";
 
 export type User = {
   id: string;
@@ -28,47 +25,21 @@ function withLock<T>(fn: () => Promise<T>): Promise<T> {
 }
 
 async function readUsers(): Promise<User[]> {
-  await fs.mkdir(DATA_DIR, { recursive: true });
-  let raw: string;
-  try {
-    raw = await fs.readFile(USERS_FILE, "utf-8");
-  } catch {
-    await fs.writeFile(USERS_FILE, "[]", "utf-8");
-    return [];
-  }
-  try {
-    return JSON.parse(raw) as User[];
-  } catch {
-    // الملف موجود بس اتلف — نعمل نسخة احتياطية بدل ما نمسحه
-    const backupPath = path.join(DATA_DIR, `users.corrupted.${Date.now()}.json`);
-    try {
-      await fs.writeFile(backupPath, raw, "utf-8");
-    } catch {
-      // تجاهل
-    }
-    await fs.writeFile(USERS_FILE, "[]", "utf-8");
-    return [];
-  }
+  return kvGetJSON<User[]>(USERS_KEY, []);
 }
 
 async function writeUsers(users: User[]): Promise<void> {
-  const tmpPath = `${USERS_FILE}.tmp`;
-  await fs.writeFile(tmpPath, JSON.stringify(users, null, 2), "utf-8");
-  await fs.rename(tmpPath, USERS_FILE);
+  await kvSetJSON(USERS_KEY, users);
 }
 
-// سر توقيع الجلسات: بيتولد أوتوماتيك أول مرة ويتحفظ في ملف محلي —
-// مفيش حاجة تتظبط يدويًا ومفيش خدمة خارجية.
+// سر توقيع الجلسات: بيتولد أوتوماتيك أول مرة ويتحفظ في Supabase —
+// مفيش حاجة تتظبط يدويًا.
 async function getSecret(): Promise<string> {
-  await fs.mkdir(DATA_DIR, { recursive: true });
-  try {
-    const s = await fs.readFile(SECRET_FILE, "utf-8");
-    return s.trim();
-  } catch {
-    const secret = crypto.randomBytes(48).toString("hex");
-    await fs.writeFile(SECRET_FILE, secret, "utf-8");
-    return secret;
-  }
+  const existing = await kvGetJSON<string | null>(SECRET_KEY, null);
+  if (existing) return existing;
+  const secret = crypto.randomBytes(48).toString("hex");
+  await kvSetJSON(SECRET_KEY, secret);
+  return secret;
 }
 
 function hashPassword(password: string, salt = crypto.randomBytes(16).toString("hex")): string {

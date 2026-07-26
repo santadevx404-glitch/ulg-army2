@@ -1,11 +1,10 @@
-// تخزين محلي بالكامل (ملف JSON على السيرفر) بدل Supabase.
-// كل البيانات بتتحفظ في data/db.json جوه مجلد المشروع.
-import { promises as fs } from "node:fs";
-import path from "node:path";
+// تخزين البيانات في Supabase بدل ملفات محلية — عشان يشتغل على منصات
+// serverless زي Vercel اللي مالهاش قرص دائم قابل للكتابة. راجع kv-store.server.ts
+// لتفاصيل الإعداد المطلوب على Vercel.
 import crypto from "node:crypto";
+import { kvGetJSON, kvSetJSON } from "./kv-store.server";
 
-const DATA_DIR = path.join(process.cwd(), "data");
-const DB_FILE = path.join(DATA_DIR, "db.json");
+const DB_KEY = "bwd:db";
 
 export type Section = {
   id: string;
@@ -85,34 +84,12 @@ function normalizeGallery(g: unknown): GalleryImage[] {
 }
 
 async function readDb(): Promise<DB> {
-  await fs.mkdir(DATA_DIR, { recursive: true });
-  let raw: string;
-  try {
-    raw = await fs.readFile(DB_FILE, "utf-8");
-  } catch {
-    // الملف مش موجود أصلاً (أول تشغيل) — آمن إننا نبدأ بالبيانات الافتراضية
-    await fs.writeFile(DB_FILE, JSON.stringify(DEFAULT_DB, null, 2), "utf-8");
-    return DEFAULT_DB;
-  }
-  try {
-    const parsed = JSON.parse(raw) as Partial<DB>;
-    return {
-      sections: (parsed.sections ?? []).map((s) => ({ password: null, ...s })),
-      items: (parsed.items ?? []).map((i) => ({ password: null, ...i, gallery: normalizeGallery(i.gallery) })),
-      topics: (parsed.topics ?? []).map((t) => ({ ...t, images: normalizeGallery((t as any).images) })),
-    };
-  } catch {
-    // الملف موجود بس اتلف (JSON غير صالح) — منمسحوش خالص، بننقله جنب
-    // كنسخة احتياطية عشان تقدر تحاول تسترجع منه يدوي، وبنبدأ ملف جديد فاضي.
-    const backupPath = path.join(DATA_DIR, `db.corrupted.${Date.now()}.json`);
-    try {
-      await fs.writeFile(backupPath, raw, "utf-8");
-    } catch {
-      // تجاهل لو فشل عمل النسخة الاحتياطية برضو
-    }
-    await fs.writeFile(DB_FILE, JSON.stringify(DEFAULT_DB, null, 2), "utf-8");
-    return DEFAULT_DB;
-  }
+  const parsed = await kvGetJSON<Partial<DB>>(DB_KEY, DEFAULT_DB);
+  return {
+    sections: (parsed.sections ?? []).map((s) => ({ password: null, ...s })),
+    items: (parsed.items ?? []).map((i) => ({ password: null, ...i, gallery: normalizeGallery(i.gallery) })),
+    topics: (parsed.topics ?? []).map((t) => ({ ...t, images: normalizeGallery((t as any).images) })),
+  };
 }
 
 function sanitizeSection(s: Section): PublicSection {
@@ -126,18 +103,7 @@ function sanitizeItem(i: Item): PublicItem {
 }
 
 async function writeDb(db: DB): Promise<void> {
-  // كتابة ذرية (atomic): بنكتب في ملف مؤقت الأول وبعدين نستبدل الملف الأصلي
-  // دفعة واحدة، عشان لو حصل أي قطع/كراش أثناء الكتابة الملف الأصلي يفضل سليم
-  // بدل ما يتلف نص كتابة.
-  // وقبل الاستبدال، بنسيب نسخة من آخر حالة سليمة في db.json.bak كخط رجعة إضافي.
-  try {
-    await fs.copyFile(DB_FILE, `${DB_FILE}.bak`);
-  } catch {
-    // أول مرة، الملف الأصلي ممكن ميكونش موجود لسه — تجاهل
-  }
-  const tmpPath = `${DB_FILE}.tmp`;
-  await fs.writeFile(tmpPath, JSON.stringify(db, null, 2), "utf-8");
-  await fs.rename(tmpPath, DB_FILE);
+  await kvSetJSON(DB_KEY, db);
 }
 
 // ---------------- Sections ----------------

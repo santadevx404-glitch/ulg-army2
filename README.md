@@ -10,31 +10,49 @@ Open your project in the [Lovable editor](https://lovable.dev) and keep building
 - **Stay in sync**: connect the project to GitHub and every change made in Lovable is committed straight to your repository.
 - **Full ownership**: this code is yours. Push to your repository and your changes sync back into Lovable, ready for your next prompt.
 
-## Development
+## Deployment on Vercel
+
+This project stores all data (sections, items, courses, topics, accounts) and
+uploaded images in a **Supabase** project — Vercel's serverless functions have
+no writable local disk, so an external store is required.
+
+1. Create a free project at [supabase.com](https://supabase.com) (no credit card required).
+2. In the Supabase **SQL Editor**, run:
+   ```sql
+   create table if not exists app_kv (
+     key text primary key,
+     value jsonb not null
+   );
+   ```
+3. In Supabase **Storage**, create a bucket named `media` and mark it **Public**.
+4. In Supabase **Settings → API**, copy the **Project URL** and the **Secret key**
+   (not the Publishable key).
+5. In your Vercel project → **Settings → Environment Variables**, add:
+   - `SUPABASE_URL` = the Project URL
+   - `SUPABASE_SERVICE_ROLE_KEY` = the Secret key
+6. **Redeploy** the project so the new environment variables take effect.
+7. Open `/auth` on your live URL and create your first account — it becomes an
+   admin automatically and can access `/admin`.
+
+## Local development
 
 You need Node.js and npm — [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating).
 
+Create a `.env` file in the project root with the same two variables from step 5
+above, then:
+
 ```sh
-git clone <this-repository-url>
-cd <repository-name>
 npm i
 npm run dev
 ```
 
-No environment variables, no external database, and no third-party account are needed.
-Everything (developer accounts, sections, items, and uploaded images) is stored locally
-on disk under `data/` and `public/uploads/`, created automatically the first time you
-run the app.
-
 ### Creating a developer/admin account
 
-1. Run the app (`npm run dev`) and open `/auth`.
+1. Run the app and open `/auth`.
 2. Click "إنشاء حساب" (create account) and enter an email + password (6+ characters).
 3. Log in — every account created this way is automatically an admin and can access `/admin`.
 
-Accounts live in `data/users.json` (passwords are hashed with scrypt, never stored in
-plain text). This folder is git-ignored so your local accounts and content never get
-committed or pushed anywhere.
+Passwords are hashed with scrypt, never stored in plain text.
 
 ## Built with
 
