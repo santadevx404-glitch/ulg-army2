@@ -17,6 +17,7 @@ import { PerformanceModeProvider, usePerformanceMode } from "@/lib/performance-m
 import { useContentProtection } from "@/lib/content-protection";
 import { Sidebar } from "@/components/Sidebar";
 import { AnimatedBackground } from "@/components/AnimatedBackground";
+import { Footer } from "@/components/Footer";
 
 function NotFoundComponent() {
   return (
@@ -106,8 +107,11 @@ function RootContent() {
     <MotionConfig reducedMotion={lite ? "always" : "user"}>
       <AnimatedBackground />
       <Sidebar />
-      <main className="lg:mr-72 min-h-screen relative z-10">
-        <Outlet />
+      <main className="lg:mr-72 min-h-screen relative z-10 flex flex-col">
+        <div className="flex-1">
+          <Outlet />
+        </div>
+        <Footer />
       </main>
       <Toaster position="top-center" richColors theme="dark" />
     </MotionConfig>
