@@ -152,11 +152,6 @@
 @keyframes reveal-up { from { opacity: 0; transform: translateY(30px); } to { opacity: 1; transform: none; } }
 .reveal { animation: reveal-up .8s cubic-bezier(.2,.8,.2,1) both; }
 
-/* تصغير عرض الموقع لـ 67% عشان يبان محتوى أكتر بنسبة 33% على نفس الشاشة.
-   بنستخدم تصغير حجم الخط الأساسي (rem) بدل خاصية zoom لأن zoom بتعمل مشاكل
-   معروفة مع العناصر fixed (زي السايدبار) وحسابات الـ viewport (h-screen). */
-html { font-size: 67%; }
-
 /* منع تحديد النصوص ونسخها في كل الموقع، ما عدا حقول الإدخال في لوحة التحكم */
 body {
   -webkit-user-select: none;
