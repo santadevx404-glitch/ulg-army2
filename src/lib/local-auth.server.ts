@@ -6,6 +6,9 @@ import { kvGetJSON, kvSetJSON } from "./kv-store.server";
 const USERS_KEY = "bwd:users";
 const SECRET_KEY = "bwd:session-secret";
 
+// إنشاء حساب جديد مسموح بس للإيميل ده — أي حد تاني يحاول يسجل هياخد رفض.
+const ALLOWED_SIGNUP_EMAIL = "santadevx404@gmail.com";
+
 export type User = {
   id: string;
   email: string;
@@ -58,6 +61,9 @@ function verifyPassword(password: string, stored: string): boolean {
 
 export async function signup(email: string, password: string): Promise<{ error?: string }> {
   const cleanEmail = email.trim().toLowerCase();
+  if (cleanEmail !== ALLOWED_SIGNUP_EMAIL) {
+    return { error: "التسجيل مقفول — الموقع ده مخصص لمطور واحد بس" };
+  }
   if (!cleanEmail || !cleanEmail.includes("@")) return { error: "الإيميل مش صحيح" };
   if (!password || password.length < 6) return { error: "كلمة المرور لازم تكون 6 أحرف على الأقل" };
 
