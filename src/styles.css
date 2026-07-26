@@ -1,0 +1,225 @@
+@import "tailwindcss" source(none);
+@source "../src";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-gold: var(--gold);
+  --color-sand: var(--sand);
+  --color-military: var(--military);
+  --font-arabic: "Cairo", "Tajawal", system-ui, sans-serif;
+}
+
+:root {
+  --radius: 0.75rem;
+  /* Military palette */
+  --background: oklch(0.18 0.02 80);        /* deep dark brown/black */
+  --foreground: oklch(0.95 0.02 80);        /* sand */
+  --card: oklch(0.22 0.025 80);
+  --card-foreground: oklch(0.95 0.02 80);
+  --popover: oklch(0.22 0.025 80);
+  --popover-foreground: oklch(0.95 0.02 80);
+  --primary: oklch(0.42 0.08 130);          /* military green */
+  --primary-foreground: oklch(0.98 0.01 80);
+  --secondary: oklch(0.32 0.04 60);         /* dark brown */
+  --secondary-foreground: oklch(0.95 0.02 80);
+  --muted: oklch(0.28 0.02 80);
+  --muted-foreground: oklch(0.72 0.03 80);
+  --accent: oklch(0.78 0.14 85);            /* gold */
+  --accent-foreground: oklch(0.18 0.02 80);
+  --destructive: oklch(0.6 0.22 25);
+  --destructive-foreground: oklch(0.98 0 0);
+  --border: oklch(0.35 0.03 80 / 60%);
+  --input: oklch(0.28 0.02 80);
+  --ring: oklch(0.78 0.14 85);
+  --gold: oklch(0.78 0.14 85);
+  --sand: oklch(0.85 0.06 80);
+  --military: oklch(0.42 0.08 130);
+
+  --gradient-bg: radial-gradient(ellipse at top, oklch(0.25 0.04 130 / 60%), transparent 60%),
+                 radial-gradient(ellipse at bottom right, oklch(0.32 0.05 60 / 50%), transparent 60%),
+                 linear-gradient(180deg, oklch(0.16 0.02 80), oklch(0.12 0.015 80));
+  --gradient-gold: linear-gradient(135deg, oklch(0.85 0.15 85), oklch(0.68 0.13 75));
+  --shadow-glow: 0 0 40px oklch(0.78 0.14 85 / 25%);
+  --shadow-card: 0 20px 50px -20px oklch(0 0 0 / 60%);
+}
+
+.dark { color-scheme: dark; }
+
+@layer base {
+  * { border-color: var(--color-border); }
+  html { direction: rtl; }
+  body {
+    background: var(--gradient-bg);
+    background-attachment: fixed;
+    color: var(--color-foreground);
+    font-family: var(--font-arabic);
+    min-height: 100vh;
+    -webkit-font-smoothing: antialiased;
+  }
+  h1, h2, h3, h4 { font-family: var(--font-arabic); font-weight: 700; }
+}
+
+/* Animated grid overlay */
+.mil-grid::before {
+  content: "";
+  position: fixed; inset: 0; pointer-events: none; z-index: 0;
+  background-image:
+    linear-gradient(oklch(0.78 0.14 85 / 4%) 1px, transparent 1px),
+    linear-gradient(90deg, oklch(0.78 0.14 85 / 4%) 1px, transparent 1px);
+  background-size: 60px 60px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+}
+
+/* Card hover glow */
+.mil-card {
+  background: linear-gradient(160deg, oklch(0.24 0.03 80 / 90%), oklch(0.18 0.02 80 / 90%));
+  border: 1px solid oklch(0.4 0.04 80 / 40%);
+  border-radius: var(--radius);
+  overflow: hidden;
+  backdrop-filter: blur(10px);
+  transition: transform .35s cubic-bezier(.2,.8,.2,1), box-shadow .35s, border-color .35s;
+}
+.mil-card:hover {
+  transform: translateY(-6px);
+  border-color: var(--gold);
+  box-shadow: var(--shadow-card), 0 0 30px oklch(0.78 0.14 85 / 20%);
+}
+.mil-card img { transition: transform .6s cubic-bezier(.2,.8,.2,1); }
+.mil-card:hover img { transform: scale(1.08); }
+
+.gold-text {
+  background: var(--gradient-gold);
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+
+.btn-gold {
+  background: var(--gradient-gold);
+  color: oklch(0.18 0.02 80);
+  padding: 0.6rem 1.4rem; border-radius: var(--radius);
+  font-weight: 700; position: relative; overflow: hidden;
+  transition: transform .2s, box-shadow .3s;
+}
+.btn-gold:hover { transform: translateY(-2px); box-shadow: var(--shadow-glow); }
+.btn-gold:active { transform: translateY(0); }
+
+/* Ripple */
+.ripple { position: relative; overflow: hidden; }
+.ripple::after {
+  content: ""; position: absolute; inset: 0;
+  background: radial-gradient(circle at var(--x,50%) var(--y,50%), oklch(1 0 0 / 25%) 0, transparent 40%);
+  opacity: 0; transition: opacity .5s;
+}
+.ripple:active::after { opacity: 1; transition: opacity 0s; }
+
+/* Floating particles */
+@keyframes float-up {
+  0% { transform: translateY(100vh) translateX(0); opacity: 0; }
+  10% { opacity: .8; }
+  100% { transform: translateY(-10vh) translateX(20px); opacity: 0; }
+}
+.particle {
+  position: fixed; bottom: -20px; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--gold); box-shadow: 0 0 12px var(--gold);
+  animation: float-up linear infinite; pointer-events: none; z-index: 1;
+}
+
+/* Reveal */
+@keyframes reveal-up { from { opacity: 0; transform: translateY(30px); } to { opacity: 1; transform: none; } }
+.reveal { animation: reveal-up .8s cubic-bezier(.2,.8,.2,1) both; }
+
+/* تصغير عرض الموقع لـ 67% عشان يبان محتوى أكتر بنسبة 33% على نفس الشاشة.
+   بنستخدم تصغير حجم الخط الأساسي (rem) بدل خاصية zoom لأن zoom بتعمل مشاكل
+   معروفة مع العناصر fixed (زي السايدبار) وحسابات الـ viewport (h-screen). */
+html { font-size: 67%; }
+
+/* منع تحديد النصوص ونسخها في كل الموقع، ما عدا حقول الإدخال في لوحة التحكم */
+body {
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  user-select: none;
+}
+input, textarea, [contenteditable="true"] {
+  -webkit-user-select: text;
+  -moz-user-select: text;
+  user-select: text;
+}
+img {
+  -webkit-user-drag: none;
+  user-drag: none;
+}
+
+/* إخفاء شكل شريط السكرول (الأبيض) مع إبقاء السكرول شغال عادي */
+html {
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* Edge/IE القديم */
+}
+html::-webkit-scrollbar {
+  display: none; /* Chrome/Edge/Safari */
+}
+* {
+  scrollbar-width: none;
+}
+*::-webkit-scrollbar {
+  display: none;
+}
+
+html { scroll-behavior: smooth; }
+
+/* وضع الأجهزة الضعيفة: قفل التأثيرات الثقيلة (بلور، تحويلات، أنيميشن CSS) */
+[data-lite="true"] .particle { display: none; }
+[data-lite="true"] .mil-card {
+  backdrop-filter: none;
+  transition: none;
+}
+[data-lite="true"] .mil-card:hover {
+  transform: none;
+  box-shadow: none;
+}
+[data-lite="true"] .mil-card img,
+[data-lite="true"] .mil-card:hover img {
+  transition: none;
+  transform: none;
+}
+[data-lite="true"] .ripple::after { display: none; }
+[data-lite="true"] .btn-gold { transition: none; }
+[data-lite="true"] .btn-gold:hover { transform: none; }
+[data-lite="true"] .reveal { animation: none; }
+
+.input {
+  width: 100%;
+  padding: 0.6rem 0.9rem;
+  border-radius: var(--radius);
+  background: var(--color-input);
+  border: 1px solid var(--color-border);
+  color: var(--color-foreground);
+  outline: none;
+  transition: border-color .2s, box-shadow .2s;
+  font-family: inherit;
+}
+.input:focus { border-color: var(--gold); box-shadow: 0 0 0 3px oklch(0.78 0.14 85 / 20%); }
+select.input { appearance: none; }
