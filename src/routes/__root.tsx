@@ -18,6 +18,7 @@ import { useContentProtection } from "@/lib/content-protection";
 import { Sidebar } from "@/components/Sidebar";
 import { AnimatedBackground } from "@/components/AnimatedBackground";
 import { Footer } from "@/components/Footer";
+import { AnnouncementBar } from "@/components/AnnouncementCard";
 
 function NotFoundComponent() {
   return (
@@ -109,6 +110,7 @@ function RootContent() {
       <Sidebar />
       <main className="lg:mr-72 min-h-screen relative z-10 flex flex-col">
         <div className="flex-1">
+          <AnnouncementBar />
           <Outlet />
         </div>
         <Footer />

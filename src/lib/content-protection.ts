@@ -2,8 +2,15 @@ import { useEffect } from "react";
 
 function isEditableTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
+  // حقول الاختبار (data-no-clipboard) مش مستثناة: النسخ واللصق ممنوعين فيها
+  if (target.closest("[data-no-clipboard]")) return false;
   const tag = target.tagName;
   return tag === "INPUT" || tag === "TEXTAREA" || target.isContentEditable;
+}
+
+// لوحة التحكم (المطور) مفيهاش أي منع للنسخ
+function isAdminPage(): boolean {
+  return typeof location !== "undefined" && location.pathname.startsWith("/admin");
 }
 
 /**
@@ -17,20 +24,24 @@ function isEditableTarget(target: EventTarget | null): boolean {
 export function useContentProtection() {
   useEffect(() => {
     const blockContextMenu = (e: MouseEvent) => {
-      if (isEditableTarget(e.target)) return;
+      if (isAdminPage() || isEditableTarget(e.target)) return;
       e.preventDefault();
     };
     const blockCopyCut = (e: ClipboardEvent) => {
-      if (isEditableTarget(e.target)) return;
+      if (isAdminPage() || isEditableTarget(e.target)) return;
       e.preventDefault();
     };
     const blockSelectStart = (e: Event) => {
-      if (isEditableTarget(e.target)) return;
+      if (isAdminPage() || isEditableTarget(e.target)) return;
       e.preventDefault();
     };
     const blockDragStart = (e: DragEvent) => {
-      if (isEditableTarget(e.target)) return;
+      if (isAdminPage() || isEditableTarget(e.target)) return;
       e.preventDefault();
+    };
+    // اللصق والإفلات: ممنوعين بس جوه حقول الاختبار
+    const blockPaste = (e: Event) => {
+      if (e.target instanceof HTMLElement && e.target.closest("[data-no-clipboard]")) e.preventDefault();
     };
 
     document.addEventListener("contextmenu", blockContextMenu);
@@ -38,6 +49,8 @@ export function useContentProtection() {
     document.addEventListener("cut", blockCopyCut);
     document.addEventListener("selectstart", blockSelectStart);
     document.addEventListener("dragstart", blockDragStart);
+    document.addEventListener("paste", blockPaste);
+    document.addEventListener("drop", blockPaste);
 
     return () => {
       document.removeEventListener("contextmenu", blockContextMenu);
@@ -45,6 +58,8 @@ export function useContentProtection() {
       document.removeEventListener("cut", blockCopyCut);
       document.removeEventListener("selectstart", blockSelectStart);
       document.removeEventListener("dragstart", blockDragStart);
+      document.removeEventListener("paste", blockPaste);
+      document.removeEventListener("drop", blockPaste);
     };
   }, []);
 }

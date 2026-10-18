@@ -1,62 +1,97 @@
-# Welcome to your Lovable project
+# موقع حرس الحدود
 
-This project was built with [Lovable](https://lovable.dev).
+TanStack Start + React + TypeScript. بيانات الموقع بتتخزن في **Supabase** (أو في ملفات لوكال للتطوير).
 
-## Build with Lovable
+## وضع التخزين (تلقائي)
 
-Open your project in the [Lovable editor](https://lovable.dev) and keep building.
+| الحالة | الوضع |
+|---|---|
+| `STORAGE_MODE=supabase` أو `local` محدد في `.env` | اللي حددته |
+| شغال على **Vercel** | Supabase دايمًا (مفيش قرص قابل للكتابة) |
+| `SUPABASE_URL` و `SUPABASE_SERVICE_ROLE_KEY` موجودين | Supabase |
+| غير كده | ملفات في مجلد `data/` |
 
-- **Ship faster**: describe what you want to build and Lovable handles the code.
-- **Stay in sync**: connect the project to GitHub and every change made in Lovable is committed straight to your repository.
-- **Full ownership**: this code is yours. Push to your repository and your changes sync back into Lovable, ready for your next prompt.
+---
 
-## Deployment on Vercel
+## ربط الموقع بـ Supabase (مرة واحدة)
 
-This project stores all data (sections, items, courses, topics, accounts) and
-uploaded images in a **Supabase** project — Vercel's serverless functions have
-no writable local disk, so an external store is required.
-
-1. Create a free project at [supabase.com](https://supabase.com) (no credit card required).
-2. In the Supabase **SQL Editor**, run:
-   ```sql
-   create table if not exists app_kv (
-     key text primary key,
-     value jsonb not null
-   );
+1. **اعمل مشروع** على [supabase.com](https://supabase.com) (مجاني).
+2. **شغّل `supabase/setup.sql`**: Supabase ← *SQL Editor* ← *New query* ← الصق محتوى الملف ← *Run*.
+   بيعمل جدول `app_kv` (مع عمود `version`)، وبيقفله على أي مفتاح غير الـ Secret، وبيعمل الـ buckets.
+   آمن تشغّله أكتر من مرة، ومفيش حاجة بتتمسح.
+3. **المفاتيح**: Supabase ← *Settings* ← *API*، وانسخ:
+   - **Project URL**
+   - **Secret key** (`service_role`) — *مش* الـ Publishable.
+4. **اعمل ملف `.env`** في مجلد المشروع (انسخ `.env.example`):
    ```
-3. In Supabase **Storage**, create a bucket named `media` and mark it **Public**.
-4. In Supabase **Settings → API**, copy the **Project URL** and the **Secret key**
-   (not the Publishable key).
-5. In your Vercel project → **Settings → Environment Variables**, add:
-   - `SUPABASE_URL` = the Project URL
-   - `SUPABASE_SERVICE_ROLE_KEY` = the Secret key
-6. **Redeploy** the project so the new environment variables take effect.
-7. Open `/auth` on your live URL and create your first account — it becomes an
-   admin automatically and can access `/admin`.
+   SUPABASE_URL=https://xxxx.supabase.co
+   SUPABASE_SERVICE_ROLE_KEY=الـ_secret_key
+   ```
+5. **انقل بياناتك الحالية** (لو عندك بيانات في `data/`):
+   ```sh
+   npm run migrate:supabase -- --dry-run   # يعرض اللي هيتنقل
+   npm run migrate:supabase                # ينقل (اللي موجود في Supabase بيتخطاه)
+   ```
+6. **شغّل المشروع** وسجّل دخول كأدمن أساسي:
+   ```sh
+   npm install
+   npm run dev
+   ```
+   هتلاقي في لوحة التحكم شارة **«قاعدة البيانات: Supabase»**. دوس عليها للفحص الكامل
+   (الجدول، عمود version، حماية التعارض، تخزين الصور، bucket الـ media).
 
-## Local development
+> لو مفيش بيانات تنقلها: افتح `/auth` ← «إنشاء حساب المطور» بإيميل الأدمن الأساسي. (الحساب الجاهز
+> `m1172009` بتاع الوضع المحلي بيشتغل في الوضع المحلي بس.)
 
-You need Node.js and npm — [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating).
+### على Vercel
 
-Create a `.env` file in the project root with the same two variables from step 5
-above, then:
+*Settings ← Environment Variables* وضيف `SUPABASE_URL` و `SUPABASE_SERVICE_ROLE_KEY`، وبعدين **Redeploy**.
+مفيش حاجة تانية. (`npm run migrate:supabase` بتشغّله من جهازك مرة واحدة.)
+
+---
+
+## إيه اللي بيتخزن فين
+
+**جدول `app_kv`** (صف لكل مفتاح، والقيمة JSON):
+
+| المفتاح | المحتوى |
+|---|---|
+| `bwd:db` | الأقسام والعناصر والمواضيع |
+| `bwd:users` | الحسابات (الباسوردات مهشّرة) |
+| `bwd:ranks` | الرتب وصلاحياتها وترتيبها |
+| `bwd:exams` / `bwd:exam-attempts` | الاختبارات وأسئلتها / محاولات الناس وإجاباتهم |
+| `bwd:chats` / `bwd:chat-messages` / `bwd:chat-uploads` | الدردشات / الرسايل / سجل رفع صور الدردشة |
+| `bwd:announcements` | الإعلانات |
+| `bwd:audit-log` / `bwd:login-log` | سجل نشاط الإدارة / سجل الدخول |
+| `bwd:session-secret` | سر توقيع الجلسات (**لا تغيّره** وإلا الكل هيتسجّل خروج) |
+
+**Storage:**
+
+| الـ bucket | المحتوى | الوصول |
+|---|---|---|
+| `media` (Public) | صور الأقسام والعناصر من لوحة التحكم | رابط عام |
+| `app-files` (Private) | `exam-uploads/` `avatars/` `chat-images/` `announcement-images/` | بس من خلال الموقع بعد فحص الصلاحيات |
+
+### حماية التعارض
+كل صف ليه `version`. أي كتابة بتتأكد إن محدش غيّر الصف بعد ما قريته، ولو حصل بتعيد العملية من الأول.
+ده بيمنع ضياع رسايل الدردشة أو إجابات الاختبار لو سيرفرين (أو شخصين) كتبوا في نفس اللحظة.
+
+### حدود لازم تعرفها
+- حجم الصورة **4 ميجا** (حد Vercel لحجم الطلب ~4.5 ميجا)، والمتصفح بيضغط الصور الكبيرة تلقائيًا.
+- `bwd:exam-attempts` و `bwd:chat-messages` بيتخزنوا كصف واحد لكل نوع. مناسب لمجموعة خاصة (عشرات الأشخاص).
+  لو الاستخدام كبر (مئات بيحلّوا اختبار في نفس الوقت) الأفضل تتحول لجداول مخصصة.
+- كل قراءة = طلب لـ Supabase، فالموقع أبطأ شوية من الوضع المحلي.
+
+---
+
+## التشغيل المحلي
 
 ```sh
-npm i
-npm run dev
+npm install
+npm run dev        # http://localhost:8080
 ```
 
-### Creating a developer/admin account
-
-1. Run the app and open `/auth`.
-2. Click "إنشاء حساب" (create account) and enter an email + password (6+ characters).
-3. Log in — every account created this way is automatically an admin and can access `/admin`.
+- من غير `.env`: وضع لوكال (ملفات `data/`)، وحساب المطور الجاهز: `santadevx404@gmail.com` / `m1172009`.
+- `npm start` بيبني وبيشغّل نسخة الإنتاج على بورت 3000.
 
 Passwords are hashed with scrypt, never stored in plain text.
-
-## Built with
-
-- TanStack Start
-- TypeScript
-- React
-- Tailwind CSS

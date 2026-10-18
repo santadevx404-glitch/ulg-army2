@@ -9,15 +9,31 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as AuthRouteImport } from './routes/auth'
-import { Route as AdminRouteImport } from './routes/admin'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as AdminRouteImport } from './routes/admin'
+import { Route as AuthRouteImport } from './routes/auth'
+import { Route as ProfileRouteImport } from './routes/profile'
+import { Route as RegisterRouteImport } from './routes/register'
+import { Route as ApiAnnouncementImageRouteImport } from './routes/api.announcement-image'
+import { Route as ApiAvatarRouteImport } from './routes/api.avatar'
+import { Route as ApiChatImageRouteImport } from './routes/api.chat-image'
+import { Route as ApiExamImageRouteImport } from './routes/api.exam-image'
+import { Route as ApiExamLeaveRouteImport } from './routes/api.exam-leave'
+import { Route as ApiStorageCheckRouteImport } from './routes/api.storage-check'
+import { Route as ChatIndexRouteImport } from './routes/chat.index'
+import { Route as ChatIdRouteImport } from './routes/chat.$id'
+import { Route as ExamsIndexRouteImport } from './routes/exams.index'
+import { Route as ExamsIdRouteImport } from './routes/exams.$id'
 import { Route as SSlugRouteImport } from './routes/s.$slug'
+import { Route as ApiAnnouncementImageNameRouteImport } from './routes/api.announcement-image.$name'
+import { Route as ApiAvatarNameRouteImport } from './routes/api.avatar.$name'
+import { Route as ApiChatImageNameRouteImport } from './routes/api.chat-image.$name'
+import { Route as ApiExamImageNameRouteImport } from './routes/api.exam-image.$name'
 import { Route as SSlugIdRouteImport } from './routes/s.$slug.$id'
 
-const AuthRoute = AuthRouteImport.update({
-  id: '/auth',
-  path: '/auth',
+const IndexRoute = IndexRouteImport.update({
+  id: '/',
+  path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AdminRoute = AdminRouteImport.update({
@@ -25,15 +41,96 @@ const AdminRoute = AdminRouteImport.update({
   path: '/admin',
   getParentRoute: () => rootRouteImport,
 } as any)
-const IndexRoute = IndexRouteImport.update({
-  id: '/',
-  path: '/',
+const AuthRoute = AuthRouteImport.update({
+  id: '/auth',
+  path: '/auth',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ProfileRoute = ProfileRouteImport.update({
+  id: '/profile',
+  path: '/profile',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const RegisterRoute = RegisterRouteImport.update({
+  id: '/register',
+  path: '/register',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiAnnouncementImageRoute = ApiAnnouncementImageRouteImport.update({
+  id: '/api/announcement-image',
+  path: '/api/announcement-image',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiAvatarRoute = ApiAvatarRouteImport.update({
+  id: '/api/avatar',
+  path: '/api/avatar',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiChatImageRoute = ApiChatImageRouteImport.update({
+  id: '/api/chat-image',
+  path: '/api/chat-image',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiExamImageRoute = ApiExamImageRouteImport.update({
+  id: '/api/exam-image',
+  path: '/api/exam-image',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiExamLeaveRoute = ApiExamLeaveRouteImport.update({
+  id: '/api/exam-leave',
+  path: '/api/exam-leave',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiStorageCheckRoute = ApiStorageCheckRouteImport.update({
+  id: '/api/storage-check',
+  path: '/api/storage-check',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ChatIndexRoute = ChatIndexRouteImport.update({
+  id: '/chat/',
+  path: '/chat/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ChatIdRoute = ChatIdRouteImport.update({
+  id: '/chat/$id',
+  path: '/chat/$id',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ExamsIndexRoute = ExamsIndexRouteImport.update({
+  id: '/exams/',
+  path: '/exams/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ExamsIdRoute = ExamsIdRouteImport.update({
+  id: '/exams/$id',
+  path: '/exams/$id',
   getParentRoute: () => rootRouteImport,
 } as any)
 const SSlugRoute = SSlugRouteImport.update({
   id: '/s/$slug',
   path: '/s/$slug',
   getParentRoute: () => rootRouteImport,
+} as any)
+const ApiAnnouncementImageNameRoute =
+  ApiAnnouncementImageNameRouteImport.update({
+    id: '/$name',
+    path: '/$name',
+    getParentRoute: () => ApiAnnouncementImageRoute,
+  } as any)
+const ApiAvatarNameRoute = ApiAvatarNameRouteImport.update({
+  id: '/$name',
+  path: '/$name',
+  getParentRoute: () => ApiAvatarRoute,
+} as any)
+const ApiChatImageNameRoute = ApiChatImageNameRouteImport.update({
+  id: '/$name',
+  path: '/$name',
+  getParentRoute: () => ApiChatImageRoute,
+} as any)
+const ApiExamImageNameRoute = ApiExamImageNameRouteImport.update({
+  id: '/$name',
+  path: '/$name',
+  getParentRoute: () => ApiExamImageRoute,
 } as any)
 const SSlugIdRoute = SSlugIdRouteImport.update({
   id: '/$id',
@@ -45,14 +142,46 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
   '/auth': typeof AuthRoute
+  '/profile': typeof ProfileRoute
+  '/register': typeof RegisterRoute
+  '/api/announcement-image': typeof ApiAnnouncementImageRouteWithChildren
+  '/api/avatar': typeof ApiAvatarRouteWithChildren
+  '/api/chat-image': typeof ApiChatImageRouteWithChildren
+  '/api/exam-image': typeof ApiExamImageRouteWithChildren
+  '/api/exam-leave': typeof ApiExamLeaveRoute
+  '/api/storage-check': typeof ApiStorageCheckRoute
+  '/chat/$id': typeof ChatIdRoute
+  '/exams/$id': typeof ExamsIdRoute
   '/s/$slug': typeof SSlugRouteWithChildren
+  '/chat/': typeof ChatIndexRoute
+  '/exams/': typeof ExamsIndexRoute
+  '/api/announcement-image/$name': typeof ApiAnnouncementImageNameRoute
+  '/api/avatar/$name': typeof ApiAvatarNameRoute
+  '/api/chat-image/$name': typeof ApiChatImageNameRoute
+  '/api/exam-image/$name': typeof ApiExamImageNameRoute
   '/s/$slug/$id': typeof SSlugIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
   '/auth': typeof AuthRoute
+  '/profile': typeof ProfileRoute
+  '/register': typeof RegisterRoute
+  '/api/announcement-image': typeof ApiAnnouncementImageRouteWithChildren
+  '/api/avatar': typeof ApiAvatarRouteWithChildren
+  '/api/chat-image': typeof ApiChatImageRouteWithChildren
+  '/api/exam-image': typeof ApiExamImageRouteWithChildren
+  '/api/exam-leave': typeof ApiExamLeaveRoute
+  '/api/storage-check': typeof ApiStorageCheckRoute
+  '/chat/$id': typeof ChatIdRoute
+  '/exams/$id': typeof ExamsIdRoute
   '/s/$slug': typeof SSlugRouteWithChildren
+  '/chat': typeof ChatIndexRoute
+  '/exams': typeof ExamsIndexRoute
+  '/api/announcement-image/$name': typeof ApiAnnouncementImageNameRoute
+  '/api/avatar/$name': typeof ApiAvatarNameRoute
+  '/api/chat-image/$name': typeof ApiChatImageNameRoute
+  '/api/exam-image/$name': typeof ApiExamImageNameRoute
   '/s/$slug/$id': typeof SSlugIdRoute
 }
 export interface FileRoutesById {
@@ -60,31 +189,123 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
   '/auth': typeof AuthRoute
+  '/profile': typeof ProfileRoute
+  '/register': typeof RegisterRoute
+  '/api/announcement-image': typeof ApiAnnouncementImageRouteWithChildren
+  '/api/avatar': typeof ApiAvatarRouteWithChildren
+  '/api/chat-image': typeof ApiChatImageRouteWithChildren
+  '/api/exam-image': typeof ApiExamImageRouteWithChildren
+  '/api/exam-leave': typeof ApiExamLeaveRoute
+  '/api/storage-check': typeof ApiStorageCheckRoute
+  '/chat/$id': typeof ChatIdRoute
+  '/exams/$id': typeof ExamsIdRoute
   '/s/$slug': typeof SSlugRouteWithChildren
+  '/chat/': typeof ChatIndexRoute
+  '/exams/': typeof ExamsIndexRoute
+  '/api/announcement-image/$name': typeof ApiAnnouncementImageNameRoute
+  '/api/avatar/$name': typeof ApiAvatarNameRoute
+  '/api/chat-image/$name': typeof ApiChatImageNameRoute
+  '/api/exam-image/$name': typeof ApiExamImageNameRoute
   '/s/$slug/$id': typeof SSlugIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/admin' | '/auth' | '/s/$slug' | '/s/$slug/$id'
+  fullPaths:
+    | '/'
+    | '/admin'
+    | '/auth'
+    | '/profile'
+    | '/register'
+    | '/api/announcement-image'
+    | '/api/avatar'
+    | '/api/chat-image'
+    | '/api/exam-image'
+    | '/api/exam-leave'
+    | '/api/storage-check'
+    | '/chat/$id'
+    | '/exams/$id'
+    | '/s/$slug'
+    | '/chat/'
+    | '/exams/'
+    | '/api/announcement-image/$name'
+    | '/api/avatar/$name'
+    | '/api/chat-image/$name'
+    | '/api/exam-image/$name'
+    | '/s/$slug/$id'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/admin' | '/auth' | '/s/$slug' | '/s/$slug/$id'
-  id: '__root__' | '/' | '/admin' | '/auth' | '/s/$slug' | '/s/$slug/$id'
+  to:
+    | '/'
+    | '/admin'
+    | '/auth'
+    | '/profile'
+    | '/register'
+    | '/api/announcement-image'
+    | '/api/avatar'
+    | '/api/chat-image'
+    | '/api/exam-image'
+    | '/api/exam-leave'
+    | '/api/storage-check'
+    | '/chat/$id'
+    | '/exams/$id'
+    | '/s/$slug'
+    | '/chat'
+    | '/exams'
+    | '/api/announcement-image/$name'
+    | '/api/avatar/$name'
+    | '/api/chat-image/$name'
+    | '/api/exam-image/$name'
+    | '/s/$slug/$id'
+  id:
+    | '__root__'
+    | '/'
+    | '/admin'
+    | '/auth'
+    | '/profile'
+    | '/register'
+    | '/api/announcement-image'
+    | '/api/avatar'
+    | '/api/chat-image'
+    | '/api/exam-image'
+    | '/api/exam-leave'
+    | '/api/storage-check'
+    | '/chat/$id'
+    | '/exams/$id'
+    | '/s/$slug'
+    | '/chat/'
+    | '/exams/'
+    | '/api/announcement-image/$name'
+    | '/api/avatar/$name'
+    | '/api/chat-image/$name'
+    | '/api/exam-image/$name'
+    | '/s/$slug/$id'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AdminRoute: typeof AdminRoute
   AuthRoute: typeof AuthRoute
+  ProfileRoute: typeof ProfileRoute
+  RegisterRoute: typeof RegisterRoute
+  ApiAnnouncementImageRoute: typeof ApiAnnouncementImageRouteWithChildren
+  ApiAvatarRoute: typeof ApiAvatarRouteWithChildren
+  ApiChatImageRoute: typeof ApiChatImageRouteWithChildren
+  ApiExamImageRoute: typeof ApiExamImageRouteWithChildren
+  ApiExamLeaveRoute: typeof ApiExamLeaveRoute
+  ApiStorageCheckRoute: typeof ApiStorageCheckRoute
+  ChatIdRoute: typeof ChatIdRoute
+  ExamsIdRoute: typeof ExamsIdRoute
   SSlugRoute: typeof SSlugRouteWithChildren
+  ChatIndexRoute: typeof ChatIndexRoute
+  ExamsIndexRoute: typeof ExamsIndexRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/auth': {
-      id: '/auth'
-      path: '/auth'
-      fullPath: '/auth'
-      preLoaderRoute: typeof AuthRouteImport
+    '/': {
+      id: '/'
+      path: '/'
+      fullPath: '/'
+      preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/admin': {
@@ -94,11 +315,95 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/': {
-      id: '/'
-      path: '/'
-      fullPath: '/'
-      preLoaderRoute: typeof IndexRouteImport
+    '/auth': {
+      id: '/auth'
+      path: '/auth'
+      fullPath: '/auth'
+      preLoaderRoute: typeof AuthRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/profile': {
+      id: '/profile'
+      path: '/profile'
+      fullPath: '/profile'
+      preLoaderRoute: typeof ProfileRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/register': {
+      id: '/register'
+      path: '/register'
+      fullPath: '/register'
+      preLoaderRoute: typeof RegisterRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/announcement-image': {
+      id: '/api/announcement-image'
+      path: '/api/announcement-image'
+      fullPath: '/api/announcement-image'
+      preLoaderRoute: typeof ApiAnnouncementImageRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/avatar': {
+      id: '/api/avatar'
+      path: '/api/avatar'
+      fullPath: '/api/avatar'
+      preLoaderRoute: typeof ApiAvatarRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/chat-image': {
+      id: '/api/chat-image'
+      path: '/api/chat-image'
+      fullPath: '/api/chat-image'
+      preLoaderRoute: typeof ApiChatImageRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/exam-image': {
+      id: '/api/exam-image'
+      path: '/api/exam-image'
+      fullPath: '/api/exam-image'
+      preLoaderRoute: typeof ApiExamImageRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/exam-leave': {
+      id: '/api/exam-leave'
+      path: '/api/exam-leave'
+      fullPath: '/api/exam-leave'
+      preLoaderRoute: typeof ApiExamLeaveRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/storage-check': {
+      id: '/api/storage-check'
+      path: '/api/storage-check'
+      fullPath: '/api/storage-check'
+      preLoaderRoute: typeof ApiStorageCheckRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/chat/': {
+      id: '/chat/'
+      path: '/chat'
+      fullPath: '/chat/'
+      preLoaderRoute: typeof ChatIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/chat/$id': {
+      id: '/chat/$id'
+      path: '/chat/$id'
+      fullPath: '/chat/$id'
+      preLoaderRoute: typeof ChatIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/exams/': {
+      id: '/exams/'
+      path: '/exams'
+      fullPath: '/exams/'
+      preLoaderRoute: typeof ExamsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/exams/$id': {
+      id: '/exams/$id'
+      path: '/exams/$id'
+      fullPath: '/exams/$id'
+      preLoaderRoute: typeof ExamsIdRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/s/$slug': {
@@ -107,6 +412,34 @@ declare module '@tanstack/react-router' {
       fullPath: '/s/$slug'
       preLoaderRoute: typeof SSlugRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/api/announcement-image/$name': {
+      id: '/api/announcement-image/$name'
+      path: '/$name'
+      fullPath: '/api/announcement-image/$name'
+      preLoaderRoute: typeof ApiAnnouncementImageNameRouteImport
+      parentRoute: typeof ApiAnnouncementImageRoute
+    }
+    '/api/avatar/$name': {
+      id: '/api/avatar/$name'
+      path: '/$name'
+      fullPath: '/api/avatar/$name'
+      preLoaderRoute: typeof ApiAvatarNameRouteImport
+      parentRoute: typeof ApiAvatarRoute
+    }
+    '/api/chat-image/$name': {
+      id: '/api/chat-image/$name'
+      path: '/$name'
+      fullPath: '/api/chat-image/$name'
+      preLoaderRoute: typeof ApiChatImageNameRouteImport
+      parentRoute: typeof ApiChatImageRoute
+    }
+    '/api/exam-image/$name': {
+      id: '/api/exam-image/$name'
+      path: '/$name'
+      fullPath: '/api/exam-image/$name'
+      preLoaderRoute: typeof ApiExamImageNameRouteImport
+      parentRoute: typeof ApiExamImageRoute
     }
     '/s/$slug/$id': {
       id: '/s/$slug/$id'
@@ -117,6 +450,53 @@ declare module '@tanstack/react-router' {
     }
   }
 }
+
+interface ApiAnnouncementImageRouteChildren {
+  ApiAnnouncementImageNameRoute: typeof ApiAnnouncementImageNameRoute
+}
+
+const ApiAnnouncementImageRouteChildren: ApiAnnouncementImageRouteChildren = {
+  ApiAnnouncementImageNameRoute: ApiAnnouncementImageNameRoute,
+}
+
+const ApiAnnouncementImageRouteWithChildren =
+  ApiAnnouncementImageRoute._addFileChildren(ApiAnnouncementImageRouteChildren)
+
+interface ApiAvatarRouteChildren {
+  ApiAvatarNameRoute: typeof ApiAvatarNameRoute
+}
+
+const ApiAvatarRouteChildren: ApiAvatarRouteChildren = {
+  ApiAvatarNameRoute: ApiAvatarNameRoute,
+}
+
+const ApiAvatarRouteWithChildren = ApiAvatarRoute._addFileChildren(
+  ApiAvatarRouteChildren,
+)
+
+interface ApiChatImageRouteChildren {
+  ApiChatImageNameRoute: typeof ApiChatImageNameRoute
+}
+
+const ApiChatImageRouteChildren: ApiChatImageRouteChildren = {
+  ApiChatImageNameRoute: ApiChatImageNameRoute,
+}
+
+const ApiChatImageRouteWithChildren = ApiChatImageRoute._addFileChildren(
+  ApiChatImageRouteChildren,
+)
+
+interface ApiExamImageRouteChildren {
+  ApiExamImageNameRoute: typeof ApiExamImageNameRoute
+}
+
+const ApiExamImageRouteChildren: ApiExamImageRouteChildren = {
+  ApiExamImageNameRoute: ApiExamImageNameRoute,
+}
+
+const ApiExamImageRouteWithChildren = ApiExamImageRoute._addFileChildren(
+  ApiExamImageRouteChildren,
+)
 
 interface SSlugRouteChildren {
   SSlugIdRoute: typeof SSlugIdRoute
@@ -132,8 +512,30 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AdminRoute: AdminRoute,
   AuthRoute: AuthRoute,
+  ProfileRoute: ProfileRoute,
+  RegisterRoute: RegisterRoute,
+  ApiAnnouncementImageRoute: ApiAnnouncementImageRouteWithChildren,
+  ApiAvatarRoute: ApiAvatarRouteWithChildren,
+  ApiChatImageRoute: ApiChatImageRouteWithChildren,
+  ApiExamImageRoute: ApiExamImageRouteWithChildren,
+  ApiExamLeaveRoute: ApiExamLeaveRoute,
+  ApiStorageCheckRoute: ApiStorageCheckRoute,
+  ChatIdRoute: ChatIdRoute,
+  ExamsIdRoute: ExamsIdRoute,
   SSlugRoute: SSlugRouteWithChildren,
+  ChatIndexRoute: ChatIndexRoute,
+  ExamsIndexRoute: ExamsIndexRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
+
+import type { getRouter } from './router.tsx'
+import type { startInstance } from './start.ts'
+declare module '@tanstack/react-start' {
+  interface Register {
+    ssr: true
+    router: Awaited<ReturnType<typeof getRouter>>
+    config: Awaited<ReturnType<typeof startInstance.getOptions>>
+  }
+}

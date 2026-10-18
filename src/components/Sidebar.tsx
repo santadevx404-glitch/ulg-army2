@@ -1,13 +1,14 @@
 import { Link, useRouterState } from "@tanstack/react-router";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import { useEffect, useState } from "react";
 import {
   Home, Award, Crosshair, Truck, GraduationCap, MapPin,
-  Shield, Menu, X, Settings, LogOut, LogIn, Gauge,
+  Shield, Menu, X, Settings, LogOut, LogIn, Gauge, ClipboardList, MessageSquare, User, UserPlus,
 } from "lucide-react";
 import { sectionsQuery } from "@/lib/queries";
-import { currentUserFn, logoutFn } from "@/lib/server-fns";
+import { logoutFn } from "@/lib/server-fns";
+import { useMe } from "@/lib/use-me";
 import { usePerformanceMode } from "@/lib/performance-mode";
 
 const iconMap: Record<string, React.ComponentType<{ className?: string }>> = {
@@ -18,18 +19,11 @@ export function Sidebar() {
   const { data: sections = [] } = useQuery(sectionsQuery);
   const path = useRouterState({ select: (s) => s.location.pathname });
   const [open, setOpen] = useState(false);
-  const [isAdmin, setIsAdmin] = useState(false);
-  const [authed, setAuthed] = useState(false);
+  const qc = useQueryClient();
+  const { me } = useMe();
+  const authed = !!me;
+  const isAdmin = !!me && me.tabs.length > 0;
   const { lite, setLite } = usePerformanceMode();
-
-  useEffect(() => {
-    const check = async () => {
-      const user = await currentUserFn();
-      setAuthed(!!user);
-      setIsAdmin(user?.role === "admin");
-    };
-    check();
-  }, []);
 
   useEffect(() => { setOpen(false); }, [path]);
 
@@ -40,6 +34,8 @@ export function Sidebar() {
       label: s.name,
       icon: (s.icon && iconMap[s.icon]) || Shield,
     })),
+    { to: "/exams" as const, label: "الاختبارات", icon: ClipboardList },
+    ...(authed ? [{ to: "/chat" as const, label: "الدردشات", icon: MessageSquare }] : []),
   ];
 
   return (
@@ -127,21 +123,30 @@ export function Sidebar() {
                 <Settings className="h-4 w-4" />لوحة التحكم
               </Link>
             )}
+            {authed && (
+              <Link to="/profile" className="flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm hover:bg-white/5 text-foreground/70">
+                <User className="h-4 w-4" />حسابي
+              </Link>
+            )}
             {authed ? (
               <button
                 onClick={async () => {
                   await logoutFn();
-                  setAuthed(false);
-                  setIsAdmin(false);
+                  qc.setQueryData(["me"], null);
                 }}
                 className="w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm hover:bg-white/5 text-foreground/70"
               >
                 <LogOut className="h-4 w-4" />تسجيل خروج
               </button>
             ) : (
-              <Link to="/auth" className="flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm hover:bg-white/5 text-foreground/70">
-                <LogIn className="h-4 w-4" />دخول المطور
-              </Link>
+              <>
+                <Link to="/auth" className="flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm hover:bg-white/5 text-foreground/70">
+                  <LogIn className="h-4 w-4" />تسجيل الدخول
+                </Link>
+                <Link to="/register" className="flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm hover:bg-white/5 text-[var(--gold)]">
+                  <UserPlus className="h-4 w-4" />طلب إنشاء حساب
+                </Link>
+              </>
             )}
           </div>
         </div>

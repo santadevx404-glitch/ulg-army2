@@ -163,6 +163,12 @@ input, textarea, [contenteditable="true"] {
   -moz-user-select: text;
   user-select: text;
 }
+/* لوحة التحكم: التحديد والنسخ شغالين (الحماية للزوار بس) */
+.admin-selectable, .admin-selectable * {
+  -webkit-user-select: text;
+  -moz-user-select: text;
+  user-select: text;
+}
 img {
   -webkit-user-drag: none;
   user-drag: none;
@@ -218,3 +224,18 @@ html { scroll-behavior: smooth; }
 }
 .input:focus { border-color: var(--gold); box-shadow: 0 0 0 3px oklch(0.78 0.14 85 / 20%); }
 select.input { appearance: none; }
+/* منع طباعة صفحة الاختبار */
+@media print {
+  .exam-root { display: none !important; }
+}
+
+/* قايمة الدردشة: سكرول شغال بشريط رفيع ظاهر (بدل الإخفاء العام) */
+.chat-scroll {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: oklch(0.78 0.14 85 / 45%) transparent;
+}
+.chat-scroll::-webkit-scrollbar { display: block; width: 8px; }
+.chat-scroll::-webkit-scrollbar-thumb { background: oklch(0.78 0.14 85 / 45%); border-radius: 8px; }
+.chat-scroll::-webkit-scrollbar-track { background: transparent; }

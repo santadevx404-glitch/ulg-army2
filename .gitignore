@@ -1,0 +1,18 @@
+node_modules
+.output
+.wrangler
+dist
+.vinxi
+
+# أسرار — مينفعش تترفع
+.env
+.env.local
+.env.*.local
+
+# ملفات مؤقتة من الوضع المحلي
+data/*.bak
+data/exam-uploads/
+data/avatars/
+data/chat-images/
+data/announcement-images/
+data/.write-test

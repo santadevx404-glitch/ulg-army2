@@ -2,7 +2,7 @@
 // serverless زي Vercel اللي مالهاش قرص دائم قابل للكتابة. راجع kv-store.server.ts
 // لتفاصيل الإعداد المطلوب على Vercel.
 import crypto from "node:crypto";
-import { kvGetJSON, kvSetJSON } from "./kv-store.server";
+import { kvGetJSON, kvSetJSON, makeLock } from "./kv-store.server";
 
 const DB_KEY = "bwd:db";
 
@@ -66,15 +66,7 @@ const DEFAULT_DB: DB = {
 };
 
 // طابور بسيط عشان لو جت طلبات كتابة في نفس اللحظة متفسدش بعض
-let writeQueue: Promise<unknown> = Promise.resolve();
-function withLock<T>(fn: () => Promise<T>): Promise<T> {
-  const run = writeQueue.then(fn, fn);
-  writeQueue = run.then(
-    () => undefined,
-    () => undefined,
-  );
-  return run;
-}
+const withLock = makeLock();
 
 function normalizeGallery(g: unknown): GalleryImage[] {
   if (!Array.isArray(g)) return [];
@@ -265,6 +257,11 @@ export async function getTopicsByItem(itemId: string): Promise<Topic[]> {
   return db.topics
     .filter((t) => t.item_id === itemId)
     .sort((a, b) => a.sort_order - b.sort_order);
+}
+
+export async function getTopic(id: string): Promise<Topic | null> {
+  const db = await readDb();
+  return db.topics.find((t) => t.id === id) ?? null;
 }
 
 export async function saveTopic(payload: Partial<Topic>): Promise<Topic> {
