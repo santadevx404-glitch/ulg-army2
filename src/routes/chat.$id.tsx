@@ -1,8 +1,8 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Download, Eraser, Eye, EyeOff, ImagePlus, Loader2, Lock, Send, Trash2, ArrowRight, X } from "lucide-react";
+import { Download, Eraser, Eye, EyeOff, ImagePlus, Loader2, Lock, Reply, Send, Trash2, ArrowRight, X } from "lucide-react";
 import { toast } from "sonner";
-import { chatMessagesFn, sendMessageFn, deleteMessageFn, clearChatFn, setImagePrivateFn, type ChatMessageRow } from "@/lib/chat-fns";
+import { chatMessagesFn, chatMembersFn, sendMessageFn, deleteMessageFn, clearChatFn, setImagePrivateFn, type ChatMessageRow, type ChatMember, type Mention } from "@/lib/chat-fns";
 import { useMe } from "@/lib/use-me";
 import { Avatar } from "@/components/Avatar";
 import { ImageLightbox, type LightboxItem } from "@/components/ImageLightbox";
@@ -27,6 +27,20 @@ const SEND_GAP_MS = 350; // أقل فاصل بين رسالتين من نفس ا
 const POLL_VISIBLE_MS = 1500; // كل 1.5 ثانية والتاب ظاهر (وأبطأ لو مخفي)
 const POLL_HIDDEN_MS = 10000;
 
+const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/** بيظبّط شكل @المنشن جوه نص الرسالة (بالذهبي)، ولو المنشن ليا بيبان أوضح. */
+function renderWithMentions(text: string, mentions: Mention[], meId: string) {
+  if (!mentions.length) return text;
+  const names = [...mentions].sort((a, b) => b.name.length - a.name.length);
+  const re = new RegExp(`(${names.map((n) => "@" + escapeRe(n.name)).join("|")})`, "g");
+  return text.split(re).map((part, i) => {
+    const hit = names.find((n) => part === "@" + n.name);
+    if (!hit) return part;
+    return <span key={i} className={`rounded px-1 font-bold text-[var(--gold)] ${hit.id === meId ? "bg-[var(--gold)]/25" : "bg-[var(--gold)]/10"}`}>{part}</span>;
+  });
+}
+
 function ChatRoom() {
   const { id } = Route.useParams();
   const navigate = useNavigate();
@@ -45,6 +59,27 @@ function ChatRoom() {
   const [lightbox, setLightbox] = useState<{ items: LightboxItem[]; index: number } | null>(null);
   const justSent = useRef(new Set<string>()); // رسايلي اللي لسه ظاهرة محليًا ومستنية polling يشوفها
   const fileRef = useRef<HTMLInputElement>(null);
+  const taRef = useRef<HTMLTextAreaElement>(null);
+  // الرد والمنشن
+  const [replyTo, setReplyTo] = useState<ChatMessageRow | null>(null);
+  const [members, setMembers] = useState<ChatMember[]>([]);
+  const [mention, setMention] = useState<{ start: number; query: string } | null>(null);
+  const [mentionIdx, setMentionIdx] = useState(0);
+  const picked = useRef(new Map<string, string>()); // id -> اسم (اللي اخترتهم من القايمة)
+  const [flashId, setFlashId] = useState<string | null>(null);
+  const meIdRef = useRef<string | undefined>(undefined);
+  meIdRef.current = me?.id;
+
+  // أعضاء الدردشة (للمنشن)
+  useEffect(() => {
+    if (!me) return;
+    let dead = false;
+    setReplyTo(null); picked.current.clear(); setMention(null);
+    const load = () => chatMembersFn({ data: { chatId: id } }).then((r) => { if (!dead) setMembers(r); }).catch(() => {});
+    load();
+    const t = setInterval(load, 60_000);
+    return () => { dead = true; clearInterval(t); };
+  }, [me, id]);
 
   useEffect(() => {
     if (!loading && !me) navigate({ to: "/auth" });
@@ -56,9 +91,18 @@ function ChatRoom() {
   const poll = useCallback(async () => {
     if (polling.current) return; // طلب واحد في الوقت (مفيش تراكم لو السيرفر بطيء)
     polling.current = true;
+    const firstLoad = lastSeq.current === undefined;
     try {
       const r = await chatMessagesFn({ data: { chatId: id, after: lastSeq.current } });
       if (activeId.current !== id) return; // اتنقلنا لدردشة تانية أثناء الطلب
+      // تنبيه لما حد يعملك منشن أو يرد على رسالتك (مش في أول تحميل للدردشة)
+      if (!firstLoad) {
+        for (const f of r.messages) {
+          if (!f.mentioned_me) continue;
+          const byMention = f.mentions.some((x) => x.id === meIdRef.current);
+          toast(`${f.character} ${byMention ? "ذكرك في رسالة" : "رد على رسالتك"}`, { description: f.text.slice(0, 80) || (f.images.length ? "📷 صورة" : undefined) });
+        }
+      }
       setRoom(r.chat);
       setCanClear(r.can_clear);
       const live = new Set(r.live_ids);
@@ -155,6 +199,8 @@ function ChatRoom() {
     if ((!t && pending.length === 0) || uploading > 0 || !me) return;
     const imgs = pending;
     const tmpId = `${TMP}${Date.now()}-${tmpCounter.current++}`;
+    const mentionList: Mention[] = [...picked.current].filter(([, name]) => t.includes(`@${name}`)).map(([mid, name]) => ({ id: mid, name }));
+    const replyId = replyTo && !replyTo.id.startsWith(TMP) ? replyTo.id : undefined;
     const myRank = [...messages].reverse().find((m) => m.mine)?.rank ?? (me.owner ? me.display_title || "الأدمن الأساسي" : me.rank_names[0] ?? "");
     const optimistic: ChatMessageRow = {
       id: tmpId,
@@ -168,6 +214,9 @@ function ChatRoom() {
       at: new Date().toISOString(),
       images: imgs.map((p) => p.name),
       private_images: imgs.filter((p) => p.private).map((p) => p.name),
+      reply_to: replyTo ? { id: replyTo.id, author_id: replyTo.author_id, character: replyTo.character, text: replyTo.text.replace(/\s+/g, " ").slice(0, 140), has_image: replyTo.images.length > 0 } : null,
+      mentions: mentionList,
+      mentioned_me: false,
       mine: true,
       can_delete: false,
     };
@@ -176,6 +225,9 @@ function ChatRoom() {
     setPending([]);
     setImgError("");
     setText("");
+    setReplyTo(null);
+    setMention(null);
+    picked.current.clear();
     stickToBottom.current = true;
 
     sendQueue.current = sendQueue.current.then(async () => {
@@ -183,7 +235,7 @@ function ChatRoom() {
       if (wait > 0) await new Promise((r) => setTimeout(r, wait));
       lastSendAt.current = Date.now();
       try {
-        const msg = await sendMessageFn({ data: { chatId: id, text: t, images: imgs.map((p) => p.name), privateImages: imgs.filter((p) => p.private).map((p) => p.name) } });
+        const msg = await sendMessageFn({ data: { chatId: id, text: t, images: imgs.map((p) => p.name), privateImages: imgs.filter((p) => p.private).map((p) => p.name), replyTo: replyId, mentions: mentionList.map((x) => x.id) } });
         imgs.forEach((p) => URL.revokeObjectURL(p.preview));
         justSent.current.add(msg.id);
         setMessages((prev) => {
@@ -199,6 +251,41 @@ function ChatRoom() {
         toast.error(e.message || "فشل الإرسال");
       }
     });
+  };
+
+  const startReply = (m: ChatMessageRow) => {
+    setReplyTo(m);
+    taRef.current?.focus();
+  };
+
+  // الضغط على الاقتباس بيودّيك للرسالة الأصلية ويظلّلها لحظة
+  const jumpTo = (mid: string) => {
+    const el = document.getElementById(`msg-${mid}`);
+    if (!el) { toast("الرسالة الأصلية قديمة أو اتمسحت"); return; }
+    stickToBottom.current = false;
+    el.scrollIntoView({ block: "center", behavior: "smooth" });
+    setFlashId(mid);
+    setTimeout(() => setFlashId((cur) => (cur === mid ? null : cur)), 1600);
+  };
+
+  // المنشن: لما تكتب @ وراها حروف بتظهر قايمة الأعضاء
+  const detectMention = (value: string, caret: number) => {
+    const m = /(^|\s)@([^\s@]{0,24})$/.exec(value.slice(0, caret));
+    if (m) { setMention({ start: caret - m[2].length - 1, query: m[2] }); setMentionIdx(0); } else setMention(null);
+  };
+  const mentionMatches = mention
+    ? members.filter((x) => x.id !== me?.id && (x.name.toLowerCase().includes(mention.query.toLowerCase()) || x.code.includes(mention.query))).slice(0, 6)
+    : [];
+  const pickMention = (mb: ChatMember) => {
+    const ta = taRef.current;
+    if (!mention || !ta) return;
+    const caret = ta.selectionStart ?? text.length;
+    const next = text.slice(0, mention.start) + `@${mb.name} ` + text.slice(caret);
+    const pos = mention.start + mb.name.length + 2;
+    picked.current.set(mb.id, mb.name);
+    setText(next.slice(0, MAX));
+    setMention(null);
+    requestAnimationFrame(() => { ta.focus(); ta.setSelectionRange(pos, pos); });
   };
 
   const togglePrivate = async (m: ChatMessageRow, name: string) => {
@@ -249,7 +336,7 @@ function ChatRoom() {
       <div ref={listRef} onScroll={onScroll} className="chat-scroll flex-1 min-h-0 rounded-xl border border-border bg-card/80 backdrop-blur p-4 space-y-4">
         {messages.length === 0 && <div className="text-center text-muted-foreground py-16 text-sm">مفيش رسايل لسه. ابدأ الكلام.</div>}
         {messages.map((m) => (
-          <div key={m.id} className="group flex gap-3">
+          <div key={m.id} id={`msg-${m.id}`} className={`group flex gap-3 rounded-lg transition-colors duration-500 ${m.mentioned_me ? "border-r-2 border-[var(--gold)] bg-[var(--gold)]/10 -mx-2 px-2 py-1.5" : ""} ${flashId === m.id ? "!bg-[var(--gold)]/25" : ""}`}>
             <Avatar name={m.character} src={m.avatar} size={40} />
             <div className="flex-1 min-w-0">
               <div className="flex items-baseline gap-2 flex-wrap text-sm">
@@ -260,11 +347,21 @@ function ChatRoom() {
                   {m.rank && <span className="text-[var(--gold)]"> - {m.rank}</span>}
                 </span>
                 <span className="text-xs text-muted-foreground">{new Date(m.at).toLocaleTimeString("ar-EG", { hour: "2-digit", minute: "2-digit" })}</span>
+                {!m.id.startsWith(TMP) && (
+                  <button onClick={() => startReply(m)} title="رد على الرسالة" className="sm:opacity-0 sm:group-hover:opacity-100 focus:opacity-100 transition text-muted-foreground hover:text-[var(--gold)]"><Reply className="h-3.5 w-3.5" /></button>
+                )}
                 {m.can_delete && (
                   <button onClick={() => remove(m)} title="حذف الرسالة" className="opacity-0 group-hover:opacity-100 transition text-muted-foreground hover:text-destructive"><Trash2 className="h-3.5 w-3.5" /></button>
                 )}
               </div>
-              {m.text && <div className="whitespace-pre-wrap break-words mt-0.5" dir="auto">{m.text}</div>}
+              {m.reply_to && (
+                <button type="button" onClick={() => jumpTo(m.reply_to!.id)} title="روح للرسالة الأصلية" className="mt-1 mb-0.5 flex max-w-full items-center gap-2 rounded-md border-r-2 border-[var(--gold)] bg-[var(--gold)]/10 px-2 py-1 text-start text-xs transition hover:bg-[var(--gold)]/20">
+                  <Reply className="h-3 w-3 shrink-0 text-[var(--gold)]" />
+                  <span className="shrink-0 font-bold text-[var(--gold)]" dir="auto">{m.reply_to.character}</span>
+                  <span className="truncate text-muted-foreground" dir="auto">{m.reply_to.text || (m.reply_to.has_image ? "📷 صورة" : "")}</span>
+                </button>
+              )}
+              {m.text && <div className="whitespace-pre-wrap break-words mt-0.5" dir="auto">{renderWithMentions(m.text, m.mentions, me.id)}</div>}
               {m.images.length > 0 && (
                 <div className="flex flex-wrap gap-2 mt-2">
                   {m.images.map((n, i) => {
@@ -316,6 +413,17 @@ function ChatRoom() {
         </div>
       )}
 
+      {replyTo && (
+        <div className="mt-3 flex items-center gap-2 rounded-lg border border-border border-r-2 border-r-[var(--gold)] bg-[var(--gold)]/10 px-3 py-2">
+          <Reply className="h-4 w-4 shrink-0 text-[var(--gold)]" />
+          <div className="min-w-0 flex-1">
+            <div className="text-xs font-bold text-[var(--gold)]" dir="auto">رد على {replyTo.character}</div>
+            <div className="truncate text-xs text-muted-foreground" dir="auto">{replyTo.text || (replyTo.images.length ? "📷 صورة" : "")}</div>
+          </div>
+          <button type="button" onClick={() => setReplyTo(null)} title="إلغاء الرد" className="p-1 text-muted-foreground hover:text-destructive"><X className="h-4 w-4" /></button>
+        </div>
+      )}
+
       <div className="mt-3 flex gap-2 items-end" onDragOver={(e) => { if (room?.allow_images) e.preventDefault(); }} onDrop={(e) => { if (room?.allow_images && e.dataTransfer.files.length) { e.preventDefault(); attach(Array.from(e.dataTransfer.files)); } }}>
         {room?.allow_images && (
           <>
@@ -323,20 +431,45 @@ function ChatRoom() {
             <input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp,image/gif" multiple className="hidden" onChange={(e) => { attach(Array.from(e.target.files ?? [])); e.target.value = ""; }} />
           </>
         )}
+        <div className="relative flex-1">
+        {mention && mentionMatches.length > 0 && (
+          <div className="absolute bottom-full right-0 left-0 z-20 mb-2 overflow-hidden rounded-lg border border-border bg-card shadow-xl">
+            <div className="px-3 py-1.5 text-[11px] text-muted-foreground border-b border-border">منشن — اختار شخص</div>
+            {mentionMatches.map((mb, i) => (
+              <button key={mb.id} type="button" onMouseDown={(e) => { e.preventDefault(); pickMention(mb); }} onMouseEnter={() => setMentionIdx(i)} className={`flex w-full items-center gap-2 px-3 py-2 text-start text-sm ${i === mentionIdx ? "bg-[var(--gold)]/15" : ""}`}>
+                <Avatar name={mb.name} src={mb.avatar} size={26} />
+                <span className="font-bold truncate" dir="auto">{mb.name}</span>
+                {mb.code && <span className="text-xs text-muted-foreground">[{mb.code}]</span>}
+              </button>
+            ))}
+          </div>
+        )}
         <textarea
-          className="input flex-1 resize-none"
+          ref={taRef}
+          className="input w-full resize-none"
           rows={2}
           maxLength={MAX}
-          placeholder={room?.allow_images ? "اكتب رسالتك أو الصق صورة... (Enter للإرسال)" : "اكتب رسالتك... (Enter للإرسال، Shift+Enter سطر جديد)"}
+          placeholder={room?.allow_images ? "اكتب رسالتك أو الصق صورة... (@ لمنشن شخص، Enter للإرسال)" : "اكتب رسالتك... (@ لمنشن شخص، Enter للإرسال، Shift+Enter سطر جديد)"}
           value={text}
-          onChange={(e) => setText(e.target.value)}
+          onChange={(e) => { setText(e.target.value); detectMention(e.target.value, e.target.selectionStart ?? e.target.value.length); }}
+          onClick={(e) => detectMention(e.currentTarget.value, e.currentTarget.selectionStart ?? 0)}
           onPaste={(e) => {
             if (!room?.allow_images) return;
             const files = Array.from(e.clipboardData.items).filter((i) => i.kind === "file" && i.type.startsWith("image/")).map((i) => i.getAsFile()).filter((f): f is File => !!f);
             if (files.length) { e.preventDefault(); attach(files); }
           }}
-          onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
+          onKeyDown={(e) => {
+            if (mention && mentionMatches.length > 0) {
+              if (e.key === "ArrowDown") { e.preventDefault(); setMentionIdx((i) => (i + 1) % mentionMatches.length); return; }
+              if (e.key === "ArrowUp") { e.preventDefault(); setMentionIdx((i) => (i - 1 + mentionMatches.length) % mentionMatches.length); return; }
+              if (e.key === "Enter" || e.key === "Tab") { e.preventDefault(); pickMention(mentionMatches[Math.min(mentionIdx, mentionMatches.length - 1)]); return; }
+              if (e.key === "Escape") { e.preventDefault(); setMention(null); return; }
+            }
+            if (e.key === "Escape" && replyTo) { setReplyTo(null); return; }
+            if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
+          }}
         />
+        </div>
         <button onClick={send} disabled={uploading > 0 || (!text.trim() && pending.length === 0)} className="btn-gold ripple h-11 px-4 inline-flex items-center gap-2 disabled:opacity-40"><Send className="h-4 w-4" />إرسال</button>
       </div>
 

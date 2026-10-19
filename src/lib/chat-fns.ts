@@ -58,6 +58,9 @@ export const chatsListFn = createServerFn({ method: "GET" }).handler(async (): P
   }));
 });
 
+export type ReplyRef = chat.ReplyRef;
+export type Mention = chat.Mention;
+
 export type ChatMessageRow = {
   id: string;
   seq: number;
@@ -70,6 +73,9 @@ export type ChatMessageRow = {
   at: string;
   images: string[];
   private_images: string[]; // الصور البرايفت (من غير تحميل، وبتتحمي من السكرين)
+  reply_to: chat.ReplyRef | null;
+  mentions: chat.Mention[];
+  mentioned_me: boolean; // اتعملي منشن أو حد رد على رسالتي
   mine: boolean;
   can_delete: boolean;
 };
@@ -103,6 +109,9 @@ export const chatMessagesFn = createServerFn({ method: "POST" })
       messages = polled.messages.map((m) => ({
         ...m,
         private_images: m.private_images ?? [],
+        reply_to: m.reply_to ?? null,
+        mentions: m.mentions ?? [],
+        mentioned_me: m.author_id !== actor.user.id && ((m.mentions ?? []).some((x) => x.id === actor.user.id) || m.reply_to?.author_id === actor.user.id),
         avatar: avatars.get(m.author_id) ?? null,
         rank: topRank.get(m.author_id) ?? m.rank,
         mine: m.author_id === actor.user.id,
@@ -124,7 +133,7 @@ export const chatMessagesFn = createServerFn({ method: "POST" })
 const sent = new Map<string, number[]>();
 
 export const sendMessageFn = createServerFn({ method: "POST" })
-  .validator((d: { chatId: string; text?: string; images?: string[]; privateImages?: string[] }) => d)
+  .validator((d: { chatId: string; text?: string; images?: string[]; privateImages?: string[]; replyTo?: string; mentions?: string[] }) => d)
   .handler(async ({ data }): Promise<ChatMessageRow> => {
     const actor = await requireActor();
     const c = await openChatFor(actor, data.chatId);
@@ -141,6 +150,13 @@ export const sendMessageFn = createServerFn({ method: "POST" })
     // الرتبة اللي بتظهر جنب الاسم = أعلى رتبة عند الشخص (حسب ترتيب الرتب اللي الأدمن حدده)
     const rank = actor.owner ? u.display_title || "الأدمن الأساسي" : (shownRank(c, u.rank_ids, await access.listRanks()) ?? "");
     const shownRankName = actor.owner && !u.character_name ? "" : rank;
+    // المنشن: لازم الشخص يكون يقدر يفتح الدردشة دي والاسم يكون مكتوب في النص فعلًا (@الاسم)
+    let mentions: chat.Mention[] = [];
+    const wanted = [...new Set(data.mentions ?? [])].slice(0, 10);
+    if (wanted.length) {
+      const members = await chatMembers(c);
+      mentions = members.filter((mm) => wanted.includes(mm.id) && (data.text ?? "").includes(`@${mm.name}`)).map((mm) => ({ id: mm.id, name: mm.name }));
+    }
     const msg = await chat.postMessage(c.id, {
       author_id: u.id,
       code: u.military_code,
@@ -149,9 +165,36 @@ export const sendMessageFn = createServerFn({ method: "POST" })
       text: data.text ?? "",
       images,
       private_images: data.privateImages ?? [],
+      reply_to_id: data.replyTo ?? null,
+      mentions,
     });
     // بنرجّع الرسالة كاملة عشان تظهر عند الكاتب فورًا من غير ما يستنى polling
-    return { ...msg, private_images: msg.private_images ?? [], avatar: u.avatar ?? null, rank: shownRankName, mine: true, can_delete: true };
+    return { ...msg, private_images: msg.private_images ?? [], reply_to: msg.reply_to ?? null, mentions: msg.mentions ?? [], mentioned_me: false, avatar: u.avatar ?? null, rank: shownRankName, mine: true, can_delete: true };
+  });
+
+/** الاسم اللي بيظهر للشخص في الدردشة (وبيتكتب في المنشن). */
+function chatDisplayName(u: auth.User): string {
+  if (u.character_name) return u.character_name;
+  return auth.isOwner(u) ? u.display_title || "الأدمن الأساسي" : u.account_name;
+}
+
+/** كل اللي يقدروا يفتحوا الدردشة دي (صاحب الموقع + أصحاب رتبها) — بيتعمل لهم منشن. */
+async function chatMembers(c: chat.Chat) {
+  const users = await auth.listUsers();
+  return users
+    .filter((u) => u.status === "active" && (auth.isOwner(u) || (c.enabled && c.rank_ids.some((id) => u.rank_ids.includes(id)))))
+    .map((u) => ({ id: u.id, name: chatDisplayName(u), code: u.military_code ?? "", avatar: u.avatar ?? null }))
+    .filter((m) => !!m.name);
+}
+
+export type ChatMember = { id: string; name: string; code: string; avatar: string | null };
+
+export const chatMembersFn = createServerFn({ method: "POST" })
+  .validator((d: { chatId: string }) => d)
+  .handler(async ({ data }): Promise<ChatMember[]> => {
+    const actor = await requireActor();
+    const c = await openChatFor(actor, data.chatId);
+    return chatMembers(c);
   });
 
 export const setImagePrivateFn = createServerFn({ method: "POST" })

@@ -38,8 +38,13 @@ export type ChatMessage = {
   text: string;
   images: string[]; // أسماء ملفات الصور
   private_images?: string[]; // الصور اللي الكاتب خلاها برايفت (من غير تحميل + حماية من السكرين)
+  reply_to?: ReplyRef | null; // الرسالة اللي ده رد عليها (نسخة وقت الرد، فتفضل ظاهرة حتى لو الأصلية اتمسحت)
+  mentions?: Mention[]; // الناس اللي اتعملهم منشن (@الاسم)
   at: string;
 };
+
+export type ReplyRef = { id: string; author_id: string; character: string; text: string; has_image: boolean };
+export type Mention = { id: string; name: string };
 
 type MsgStore = Record<string, { next: number; messages: ChatMessage[] }>;
 type UploadReg = Record<string, { user_id: string; chat_id: string; used: boolean; at: string; private?: boolean }>;
@@ -71,7 +76,7 @@ async function readUploads(): Promise<UploadReg> {
 async function writeUploads(u: UploadReg) {
   await kvSetJSON(UPLOADS_KEY, u);
 }
-const withImages = (m: ChatMessage): ChatMessage => ({ ...m, images: m.images ?? [], private_images: (m.private_images ?? []).filter((n) => (m.images ?? []).includes(n)) });
+const withImages = (m: ChatMessage): ChatMessage => ({ ...m, images: m.images ?? [], reply_to: m.reply_to ?? null, mentions: m.mentions ?? [], private_images: (m.private_images ?? []).filter((n) => (m.images ?? []).includes(n)) });
 
 // قراءات للعرض بس (polling): مشتركة بين الطلبات ومتخزنة لحظات قليلة عشان الدردشة متبقاش تقيلة
 async function readMsgsShared(): Promise<MsgStore> {
@@ -184,7 +189,7 @@ export async function pollMessages(chatId: string, afterSeq?: number): Promise<{
   return { messages, live };
 }
 
-export async function postMessage(chatId: string, m: Omit<ChatMessage, "id" | "seq" | "at">): Promise<ChatMessage> {
+export async function postMessage(chatId: string, m: Omit<ChatMessage, "id" | "seq" | "at" | "reply_to"> & { reply_to_id?: string | null }): Promise<ChatMessage> {
   // بنشيل الحروف الخفية/التحكم ونحافظ على الأسطر
   const text = m.text.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u200B-\u200F\u202A-\u202E\u2066-\u2069]/g, "").replace(/\n{4,}/g, "\n\n\n").trim();
   const images = [...new Set(m.images ?? [])];
@@ -205,7 +210,19 @@ export async function postMessage(chatId: string, m: Omit<ChatMessage, "id" | "s
     }
     const store = await readMsgs();
     const entry = store[chatId] ?? { next: 1, messages: [] };
-    const msg: ChatMessage = { ...m, text, images, private_images: priv, id: crypto.randomUUID(), seq: entry.next, at: new Date().toISOString() };
+    // نسخة من الرسالة اللي بنرد عليها (لازم تكون في نفس الدردشة)
+    let reply_to: ReplyRef | null = null;
+    if (m.reply_to_id) {
+      const target = entry.messages.find((x) => x.id === m.reply_to_id);
+      if (target) {
+        reply_to = {
+          id: target.id, author_id: target.author_id, character: target.character,
+          text: (target.text ?? "").replace(/\s+/g, " ").slice(0, 140), has_image: (target.images ?? []).length > 0,
+        };
+      }
+    }
+    const { reply_to_id: _drop, ...rest } = m;
+    const msg: ChatMessage = { ...rest, text, images, private_images: priv, reply_to, mentions: (m.mentions ?? []).slice(0, 10), id: crypto.randomUUID(), seq: entry.next, at: new Date().toISOString() };
     entry.next += 1;
     entry.messages = [...entry.messages, msg].slice(-MAX_PER_CHAT);
     store[chatId] = entry;
