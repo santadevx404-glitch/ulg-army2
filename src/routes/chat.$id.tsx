@@ -21,6 +21,9 @@ const IMG_MAX_BYTES = 4 * 1024 * 1024;
 type Room = { id: string; name: string; description: string; rank_names: string[]; allow_images: boolean };
 type Pending = { name: string; preview: string; private: boolean };
 
+const TMP = "tmp-"; // ids الرسايل اللي لسه بتتبعت (بتظهر فورًا)
+const SEND_GAP_MS = 350; // أقل فاصل بين رسالتين من نفس الشخص (يتوافق مع حماية السيرفر)
+
 const POLL_VISIBLE_MS = 1500; // كل 1.5 ثانية والتاب ظاهر (وأبطأ لو مخفي)
 const POLL_HIDDEN_MS = 10000;
 
@@ -33,7 +36,6 @@ function ChatRoom() {
   const [denied, setDenied] = useState("");
   const [canClear, setCanClear] = useState(false);
   const [text, setText] = useState("");
-  const [sending, setSending] = useState(false);
   const lastSeq = useRef<number | undefined>(undefined);
   const listRef = useRef<HTMLDivElement>(null);
   const stickToBottom = useRef(true);
@@ -63,8 +65,15 @@ function ChatRoom() {
       for (const mid of live) justSent.current.delete(mid); // السيرفر شافها خلاص
       setMessages((prev) => {
         // الرسايل الجديدة بس هي اللي بتتضاف، والمتمسوحة بتتشال (ورسايلي اللي لسه مبعوتة من لحظة بتفضل)
-        const kept = prev.filter((m) => live.has(m.id) || justSent.current.has(m.id));
+        let kept = prev.filter((m) => live.has(m.id) || justSent.current.has(m.id) || m.id.startsWith(TMP));
         const fresh = r.messages.filter((m) => !kept.some((p) => p.id === m.id));
+        // لو رسالتي الحقيقية وصلت قبل ما رد الإرسال يرجع، نشيل نسختها المؤقتة عشان متتكررش
+        for (const f of fresh) {
+          if (!f.mine) continue;
+          const key = f.text + "|" + f.images.join(",");
+          const i = kept.findIndex((k) => k.id.startsWith(TMP) && k.text + "|" + k.images.join(",") === key);
+          if (i >= 0) kept = kept.filter((_, j) => j !== i);
+        }
         const merged = [...kept, ...fresh].map((m) => (m.images.length ? { ...m, private_images: r.private_map[m.id] ?? (live.has(m.id) ? [] : m.private_images) } : m));
         const maxSeq = r.messages.reduce((a, m) => Math.max(a, m.seq), lastSeq.current ?? 0);
         lastSeq.current = Math.max(maxSeq, lastSeq.current ?? 0);
@@ -134,24 +143,62 @@ function ChatRoom() {
     fetch(`/api/chat-image?name=${encodeURIComponent(p.name)}`, { method: "DELETE" }).catch(() => {});
   };
 
-  const send = async () => {
+  // ===== الإرسال الفوري =====
+  // الرسالة بتظهر في نفس اللحظة اللي تدوس فيها إرسال والخانة بتفضى، والرفع للسيرفر بيحصل في الخلفية
+  // (في طابور بيحافظ على الترتيب). لو فشل، الرسالة بتتشال والنص بيرجع لك عشان متضيعش.
+  const sendQueue = useRef<Promise<void>>(Promise.resolve());
+  const lastSendAt = useRef(0);
+  const tmpCounter = useRef(0);
+
+  const send = () => {
     const t = text.trim();
-    if ((!t && pending.length === 0) || sending || uploading > 0) return;
-    setSending(true);
-    try {
-      const msg = await sendMessageFn({ data: { chatId: id, text: t, images: pending.map((p) => p.name), privateImages: pending.filter((p) => p.private).map((p) => p.name) } });
-      pending.forEach((p) => URL.revokeObjectURL(p.preview));
-      setPending([]);
-      setImgError("");
-      setText("");
-      stickToBottom.current = true;
-      // الرسالة بتظهر فورًا عندي من غير ما أستنى polling (lastSeq مش بيتغيّر عشان محدش يفوّت رسايل غيري)
-      justSent.current.add(msg.id);
-      setMessages((prev) => (prev.some((m) => m.id === msg.id) ? prev : [...prev, msg].sort((a, b) => a.seq - b.seq)));
-      void poll();
-    } catch (e: any) {
-      toast.error(e.message || "فشل الإرسال");
-    } finally { setSending(false); }
+    if ((!t && pending.length === 0) || uploading > 0 || !me) return;
+    const imgs = pending;
+    const tmpId = `${TMP}${Date.now()}-${tmpCounter.current++}`;
+    const myRank = [...messages].reverse().find((m) => m.mine)?.rank ?? (me.owner ? me.display_title || "الأدمن الأساسي" : me.rank_names[0] ?? "");
+    const optimistic: ChatMessageRow = {
+      id: tmpId,
+      seq: 1e12 + tmpCounter.current, // دايمًا في الآخر لحد ما السيرفر يدّيها رقمها الحقيقي
+      author_id: me.id,
+      code: me.military_code ?? "",
+      character: me.character_name || (me.owner ? me.display_title || "الأدمن الأساسي" : me.account_name),
+      rank: me.owner && !me.character_name ? "" : myRank,
+      avatar: me.avatar ?? null,
+      text: t,
+      at: new Date().toISOString(),
+      images: imgs.map((p) => p.name),
+      private_images: imgs.filter((p) => p.private).map((p) => p.name),
+      mine: true,
+      can_delete: false,
+    };
+    // فورًا: الرسالة تظهر + الخانة تفضى
+    setMessages((prev) => [...prev, optimistic]);
+    setPending([]);
+    setImgError("");
+    setText("");
+    stickToBottom.current = true;
+
+    sendQueue.current = sendQueue.current.then(async () => {
+      const wait = SEND_GAP_MS - (Date.now() - lastSendAt.current);
+      if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+      lastSendAt.current = Date.now();
+      try {
+        const msg = await sendMessageFn({ data: { chatId: id, text: t, images: imgs.map((p) => p.name), privateImages: imgs.filter((p) => p.private).map((p) => p.name) } });
+        imgs.forEach((p) => URL.revokeObjectURL(p.preview));
+        justSent.current.add(msg.id);
+        setMessages((prev) => {
+          const without = prev.filter((m) => m.id !== tmpId);
+          return (without.some((m) => m.id === msg.id) ? without : [...without, msg]).sort((a, b) => a.seq - b.seq);
+        });
+        void poll();
+      } catch (e: any) {
+        // فشل: نشيل الرسالة المؤقتة ونرجّع النص والصور عشان يعيد الإرسال
+        setMessages((prev) => prev.filter((m) => m.id !== tmpId));
+        setText((cur) => (cur ? cur : t));
+        setPending((cur) => (cur.length ? cur : imgs));
+        toast.error(e.message || "فشل الإرسال");
+      }
+    });
   };
 
   const togglePrivate = async (m: ChatMessageRow, name: string) => {
@@ -234,7 +281,7 @@ function ChatRoom() {
                           {!isPriv && (
                             <a href={`${url}?download=1`} download title="تحميل الصورة" onClick={(e) => e.stopPropagation()} className="h-7 w-7 rounded-md bg-black/60 text-white hover:text-[var(--gold)] flex items-center justify-center"><Download className="h-4 w-4" /></a>
                           )}
-                          {m.mine && (
+                          {m.mine && !m.id.startsWith(TMP) && (
                             <button type="button" onClick={() => togglePrivate(m, n)} title={isPriv ? "خلّي الصورة عادية (يظهر زرار التحميل)" : "خلّي الصورة برايفت (من غير تحميل)"} className="h-7 w-7 rounded-md bg-black/60 text-white hover:text-[var(--gold)] flex items-center justify-center">
                               {isPriv ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                             </button>
@@ -290,7 +337,7 @@ function ChatRoom() {
           }}
           onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
         />
-        <button onClick={send} disabled={sending || uploading > 0 || (!text.trim() && pending.length === 0)} className="btn-gold ripple h-11 px-4 inline-flex items-center gap-2 disabled:opacity-40"><Send className="h-4 w-4" />إرسال</button>
+        <button onClick={send} disabled={uploading > 0 || (!text.trim() && pending.length === 0)} className="btn-gold ripple h-11 px-4 inline-flex items-center gap-2 disabled:opacity-40"><Send className="h-4 w-4" />إرسال</button>
       </div>
 
       {lightbox && <ImageLightbox items={lightbox.items} index={lightbox.index} onIndex={(i) => setLightbox({ ...lightbox, index: i })} onClose={() => setLightbox(null)} />}

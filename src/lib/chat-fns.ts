@@ -120,7 +120,7 @@ export const chatMessagesFn = createServerFn({ method: "POST" })
     };
   });
 
-// حماية من الإغراق: رسالة كل 700ms وحد أقصى 20 رسالة كل 30 ثانية لكل شخص
+// حماية من الإغراق: رسالة كل 300ms وحد أقصى 20 رسالة كل 30 ثانية لكل شخص
 const sent = new Map<string, number[]>();
 
 export const sendMessageFn = createServerFn({ method: "POST" })
@@ -133,7 +133,7 @@ export const sendMessageFn = createServerFn({ method: "POST" })
 
     const now = Date.now();
     const recent = (sent.get(actor.user.id) ?? []).filter((t) => now - t < 30_000);
-    if (recent.length && now - recent[recent.length - 1] < 700) throw new Error("براحة شوية، استنى لحظة");
+    if (recent.length && now - recent[recent.length - 1] < 300) throw new Error("براحة شوية، استنى لحظة");
     if (recent.length >= 20) throw new Error("رسايل كتير في وقت قصير، استنى شوية");
     sent.set(actor.user.id, [...recent, now]);
 
