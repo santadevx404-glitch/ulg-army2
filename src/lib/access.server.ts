@@ -63,9 +63,9 @@ function ranksOfUser(user: auth.User, all: Rank[]): Rank[] {
 /** المستخدم الحالي لو حسابه مفعّل. بيرجع null للموقوف/المعلّق/المحذوف. */
 export async function actorFromUserId(uid: string | null): Promise<Actor | null> {
   if (!uid) return null;
-  const user = await auth.getUserById(uid);
+  const [user, allRanks] = await Promise.all([auth.getUserById(uid), readRanks()]); // بالتوازي بدل ورا بعض
   if (!user || user.status !== "active") return null;
-  const ranks = ranksOfUser(user, await readRanks());
+  const ranks = ranksOfUser(user, allRanks);
   const owner = auth.isOwner(user);
   return { user, owner, ranks, rankNames: ranks.map((r) => r.name), perms: owner ? new Set() : effectivePerms(user, ranks) };
 }

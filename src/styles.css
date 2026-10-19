@@ -66,9 +66,106 @@
   --gradient-gold: linear-gradient(135deg, oklch(0.85 0.15 85), oklch(0.68 0.13 75));
   --shadow-glow: 0 0 40px oklch(0.78 0.14 85 / 25%);
   --shadow-card: 0 20px 50px -20px oklch(0 0 0 / 60%);
+
+  /* متغيرات إضافية بتتغيّر مع الثيم */
+  --gradient-gold-text: var(--gradient-gold);
+  --card-grad-from: oklch(0.24 0.03 80 / 90%);
+  --card-grad-to: oklch(0.18 0.02 80 / 90%);
+  --card-border: oklch(0.4 0.04 80 / 40%);
+  --sidebar-from: oklch(0.2 0.03 80 / 95%);
+  --sidebar-to: oklch(0.14 0.02 80 / 95%);
+  --grid-line: oklch(0.78 0.14 85 / 4%);
+  color-scheme: dark;
 }
 
-.dark { color-scheme: dark; }
+/* ============ الثيمات ============
+   عادي (الافتراضي) = الألوان الحالية فوق.
+   داكن = أسود + ذهبي غامق جدًا.  فاتح = أبيض + ذهبي فاتح جدًا. */
+[data-theme="dark"] {
+  --background: oklch(0.11 0.008 85);
+  --foreground: oklch(0.9 0.03 85);
+  --card: oklch(0.15 0.014 85);
+  --card-foreground: oklch(0.9 0.03 85);
+  --popover: oklch(0.15 0.014 85);
+  --popover-foreground: oklch(0.9 0.03 85);
+  --primary: oklch(0.36 0.06 130);
+  --primary-foreground: oklch(0.96 0.01 85);
+  --secondary: oklch(0.2 0.02 85);
+  --secondary-foreground: oklch(0.9 0.03 85);
+  --muted: oklch(0.19 0.014 85);
+  --muted-foreground: oklch(0.66 0.04 85);
+  --accent: oklch(0.68 0.115 82);
+  --accent-foreground: oklch(0.12 0.01 85);
+  --border: oklch(0.3 0.04 85 / 55%);
+  --input: oklch(0.17 0.014 85);
+  --ring: oklch(0.68 0.115 82);
+  --gold: oklch(0.68 0.115 82);
+  --sand: oklch(0.75 0.06 85);
+  --military: oklch(0.36 0.06 130);
+  --gradient-bg: radial-gradient(ellipse at top, oklch(0.2 0.04 85 / 40%), transparent 60%),
+                 radial-gradient(ellipse at bottom right, oklch(0.17 0.03 80 / 40%), transparent 60%),
+                 linear-gradient(180deg, oklch(0.1 0.006 85), oklch(0.07 0.004 85));
+  --gradient-gold: linear-gradient(135deg, oklch(0.76 0.12 85), oklch(0.56 0.1 78));
+  --gradient-gold-text: var(--gradient-gold);
+  --shadow-glow: 0 0 40px oklch(0.68 0.115 82 / 22%);
+  --shadow-card: 0 20px 50px -20px oklch(0 0 0 / 80%);
+  --card-grad-from: oklch(0.17 0.018 85 / 92%);
+  --card-grad-to: oklch(0.12 0.01 85 / 92%);
+  --card-border: oklch(0.32 0.045 85 / 45%);
+  --sidebar-from: oklch(0.14 0.015 85 / 96%);
+  --sidebar-to: oklch(0.09 0.008 85 / 96%);
+  --grid-line: oklch(0.68 0.115 82 / 4%);
+  color-scheme: dark;
+}
+
+[data-theme="light"] {
+  --background: oklch(0.995 0.004 90);
+  --foreground: oklch(0.24 0.02 80);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.24 0.02 80);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.24 0.02 80);
+  --primary: oklch(0.42 0.08 130);
+  --primary-foreground: oklch(0.99 0.005 90);
+  --secondary: oklch(0.96 0.02 90);
+  --secondary-foreground: oklch(0.28 0.03 80);
+  --muted: oklch(0.965 0.012 90);
+  --muted-foreground: oklch(0.5 0.03 80);
+  --accent: oklch(0.62 0.13 80);
+  --accent-foreground: oklch(0.2 0.02 80);
+  --border: oklch(0.88 0.035 90 / 80%);
+  --input: oklch(0.985 0.01 90);
+  --ring: oklch(0.62 0.13 80);
+  --gold: oklch(0.62 0.13 80);
+  --sand: oklch(0.55 0.08 80);
+  --military: oklch(0.42 0.08 130);
+  --destructive: oklch(0.55 0.22 25);
+  --gradient-bg: radial-gradient(ellipse at top, oklch(0.96 0.04 92 / 70%), transparent 60%),
+                 radial-gradient(ellipse at bottom right, oklch(0.97 0.03 88 / 60%), transparent 60%),
+                 linear-gradient(180deg, oklch(1 0 0), oklch(0.98 0.012 90));
+  --gradient-gold: linear-gradient(135deg, oklch(0.85 0.13 88), oklch(0.7 0.13 80));
+  --gradient-gold-text: linear-gradient(135deg, oklch(0.68 0.14 85), oklch(0.5 0.12 75));
+  --shadow-glow: 0 0 40px oklch(0.62 0.13 80 / 22%);
+  --shadow-card: 0 20px 50px -20px oklch(0.4 0.05 85 / 18%);
+  --card-grad-from: oklch(1 0 0 / 96%);
+  --card-grad-to: oklch(0.985 0.012 90 / 96%);
+  --card-border: oklch(0.86 0.04 90 / 75%);
+  --sidebar-from: oklch(0.998 0.006 90 / 97%);
+  --sidebar-to: oklch(0.97 0.022 90 / 97%);
+  --grid-line: oklch(0.62 0.13 80 / 7%);
+  color-scheme: light;
+  /* ألوان الحالات (أخضر/أصفر/أحمر) أغمق عشان تتقري على الأبيض */
+  --color-emerald-400: oklch(0.5 0.14 160);
+  --color-amber-400: oklch(0.55 0.14 70);
+  --color-red-400: oklch(0.55 0.2 25);
+}
+/* لمسات "الشفاف الأبيض" بتبقى شفاف غامق في الفاتح */
+[data-theme="light"] .bg-white\/5,
+[data-theme="light"] .hover\:bg-white\/5:hover,
+[data-theme="light"] .bg-white\/15,
+[data-theme="light"] .bg-white\/10.text-muted-foreground { background-color: oklch(0.3 0.03 80 / 7%) !important; }
+[data-theme="light"] .bg-white\/15 { background-color: oklch(0.62 0.13 80 / 18%) !important; }
+[data-theme="light"] .bg-black\/20 { background-color: oklch(0.3 0.03 80 / 6%) !important; }
 
 @layer base {
   * { border-color: var(--color-border); }
@@ -89,16 +186,16 @@
   content: "";
   position: fixed; inset: 0; pointer-events: none; z-index: 0;
   background-image:
-    linear-gradient(oklch(0.78 0.14 85 / 4%) 1px, transparent 1px),
-    linear-gradient(90deg, oklch(0.78 0.14 85 / 4%) 1px, transparent 1px);
+    linear-gradient(var(--grid-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
   background-size: 60px 60px;
   mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
 }
 
 /* Card hover glow */
 .mil-card {
-  background: linear-gradient(160deg, oklch(0.24 0.03 80 / 90%), oklch(0.18 0.02 80 / 90%));
-  border: 1px solid oklch(0.4 0.04 80 / 40%);
+  background: linear-gradient(160deg, var(--card-grad-from), var(--card-grad-to));
+  border: 1px solid var(--card-border);
   border-radius: var(--radius);
   overflow: hidden;
   backdrop-filter: blur(10px);
@@ -113,7 +210,7 @@
 .mil-card:hover img { transform: scale(1.08); }
 
 .gold-text {
-  background: var(--gradient-gold);
+  background: var(--gradient-gold-text);
   -webkit-background-clip: text; background-clip: text; color: transparent;
 }
 
@@ -239,3 +336,9 @@ select.input { appearance: none; }
 .chat-scroll::-webkit-scrollbar { display: block; width: 8px; }
 .chat-scroll::-webkit-scrollbar-thumb { background: oklch(0.78 0.14 85 / 45%); border-radius: 8px; }
 .chat-scroll::-webkit-scrollbar-track { background: transparent; }
+
+/* السايد بار بيدخل جوا البار بتاعه (يمين) لما عارض الصور يتفتح، ويرجع لما يتقفل */
+.sidebar-away { translate: 100% 0 !important; }
+
+/* الصور البرايفت مبتتطبعش */
+@media print { .private-canvas { display: none !important; } }

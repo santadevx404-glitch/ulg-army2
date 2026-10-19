@@ -1,11 +1,12 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Eraser, ImagePlus, Loader2, Lock, Send, Trash2, ArrowRight, X } from "lucide-react";
+import { Download, Eraser, Eye, EyeOff, ImagePlus, Loader2, Lock, Send, Trash2, ArrowRight, X } from "lucide-react";
 import { toast } from "sonner";
-import { chatMessagesFn, sendMessageFn, deleteMessageFn, clearChatFn, type ChatMessageRow } from "@/lib/chat-fns";
+import { chatMessagesFn, sendMessageFn, deleteMessageFn, clearChatFn, setImagePrivateFn, type ChatMessageRow } from "@/lib/chat-fns";
 import { useMe } from "@/lib/use-me";
 import { Avatar } from "@/components/Avatar";
-import { ImageLightbox } from "@/components/ImageLightbox";
+import { ImageLightbox, type LightboxItem } from "@/components/ImageLightbox";
+import { PrivateImage } from "@/components/PrivateImage";
 import { prepareImage } from "@/lib/image-utils";
 
 export const Route = createFileRoute("/chat/$id")({
@@ -18,7 +19,10 @@ const MAX_IMAGES = 4;
 const IMG_MAX_BYTES = 4 * 1024 * 1024;
 
 type Room = { id: string; name: string; description: string; rank_names: string[]; allow_images: boolean };
-type Pending = { name: string; preview: string };
+type Pending = { name: string; preview: string; private: boolean };
+
+const POLL_VISIBLE_MS = 1500; // كل 1.5 ثانية والتاب ظاهر (وأبطأ لو مخفي)
+const POLL_HIDDEN_MS = 10000;
 
 function ChatRoom() {
   const { id } = Route.useParams();
@@ -36,46 +40,60 @@ function ChatRoom() {
   const [pending, setPending] = useState<Pending[]>([]);
   const [uploading, setUploading] = useState(0);
   const [imgError, setImgError] = useState("");
-  const [lightbox, setLightbox] = useState<{ urls: string[]; index: number } | null>(null);
+  const [lightbox, setLightbox] = useState<{ items: LightboxItem[]; index: number } | null>(null);
+  const justSent = useRef(new Set<string>()); // رسايلي اللي لسه ظاهرة محليًا ومستنية polling يشوفها
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!loading && !me) navigate({ to: "/auth" });
   }, [loading, me, navigate]);
 
+  const polling = useRef(false);
+  const activeId = useRef(id);
+  activeId.current = id;
   const poll = useCallback(async () => {
+    if (polling.current) return; // طلب واحد في الوقت (مفيش تراكم لو السيرفر بطيء)
+    polling.current = true;
     try {
       const r = await chatMessagesFn({ data: { chatId: id, after: lastSeq.current } });
+      if (activeId.current !== id) return; // اتنقلنا لدردشة تانية أثناء الطلب
       setRoom(r.chat);
       setCanClear(r.can_clear);
+      const live = new Set(r.live_ids);
+      for (const mid of live) justSent.current.delete(mid); // السيرفر شافها خلاص
       setMessages((prev) => {
-        const live = new Set(r.live_ids);
-        const merged = [...prev.filter((m) => live.has(m.id)), ...r.messages.filter((m) => !prev.some((p) => p.id === m.id))];
-        // الرسايل الجديدة بس هي اللي بتتضاف، والمتمسوحة بتتشال
-        const maxSeq = merged.reduce((a, m) => Math.max(a, m.seq), lastSeq.current ?? 0);
-        lastSeq.current = Math.max(maxSeq, r.messages.reduce((a, m) => Math.max(a, m.seq), lastSeq.current ?? 0));
+        // الرسايل الجديدة بس هي اللي بتتضاف، والمتمسوحة بتتشال (ورسايلي اللي لسه مبعوتة من لحظة بتفضل)
+        const kept = prev.filter((m) => live.has(m.id) || justSent.current.has(m.id));
+        const fresh = r.messages.filter((m) => !kept.some((p) => p.id === m.id));
+        const merged = [...kept, ...fresh].map((m) => (m.images.length ? { ...m, private_images: r.private_map[m.id] ?? (live.has(m.id) ? [] : m.private_images) } : m));
+        const maxSeq = r.messages.reduce((a, m) => Math.max(a, m.seq), lastSeq.current ?? 0);
+        lastSeq.current = Math.max(maxSeq, lastSeq.current ?? 0);
         return merged.sort((a, b) => a.seq - b.seq);
       });
       setDenied("");
     } catch (e: any) {
       const m = String(e?.message || "");
       if (m.includes("مقفولة") || m.includes("غير موجودة")) setDenied(m);
-    }
+    } finally { polling.current = false; }
   }, [id]);
 
-  // تحديث كل 3 ثواني (وأبطأ لو التاب مش ظاهر)
+  // تحديث كل 1.5 ثانية (وأبطأ لو التاب مش ظاهر) + تحديث فوري أول ما ترجع للتاب
   useEffect(() => {
     if (!me) return;
     lastSeq.current = undefined;
+    polling.current = false;
+    justSent.current.clear();
     setMessages([]);
     poll();
     let stop = false;
     let timer: ReturnType<typeof setTimeout>;
     const loop = () => {
-      timer = setTimeout(async () => { if (stop) return; await poll(); loop(); }, document.visibilityState === "visible" ? 3000 : 12000);
+      timer = setTimeout(async () => { if (stop) return; await poll(); loop(); }, document.visibilityState === "visible" ? POLL_VISIBLE_MS : POLL_HIDDEN_MS);
     };
     loop();
-    return () => { stop = true; clearTimeout(timer); };
+    const onVis = () => { if (document.visibilityState === "visible") poll(); };
+    document.addEventListener("visibilitychange", onVis);
+    return () => { stop = true; clearTimeout(timer); document.removeEventListener("visibilitychange", onVis); };
   }, [me, id, poll]);
 
   // نزّل لآخر رسالة لو الشخص قريب من الآخر
@@ -103,7 +121,7 @@ function ChatRoom() {
         const r = await fetch(`/api/chat-image?chatId=${encodeURIComponent(id)}`, { method: "POST", headers: { "Content-Type": blob.type }, body: blob });
         const j = await r.json();
         if (!r.ok) throw new Error(j.error || "فشل رفع الصورة");
-        setPending((p) => [...p, { name: j.name, preview: URL.createObjectURL(blob) }]);
+        setPending((p) => [...p, { name: j.name, preview: URL.createObjectURL(blob), private: false }]);
       } catch (e: any) {
         setImgError(e.message || "فشل رفع الصورة");
       } finally { setUploading((n) => n - 1); }
@@ -121,16 +139,31 @@ function ChatRoom() {
     if ((!t && pending.length === 0) || sending || uploading > 0) return;
     setSending(true);
     try {
-      await sendMessageFn({ data: { chatId: id, text: t, images: pending.map((p) => p.name) } });
+      const msg = await sendMessageFn({ data: { chatId: id, text: t, images: pending.map((p) => p.name), privateImages: pending.filter((p) => p.private).map((p) => p.name) } });
       pending.forEach((p) => URL.revokeObjectURL(p.preview));
       setPending([]);
       setImgError("");
       setText("");
       stickToBottom.current = true;
-      await poll();
+      // الرسالة بتظهر فورًا عندي من غير ما أستنى polling (lastSeq مش بيتغيّر عشان محدش يفوّت رسايل غيري)
+      justSent.current.add(msg.id);
+      setMessages((prev) => (prev.some((m) => m.id === msg.id) ? prev : [...prev, msg].sort((a, b) => a.seq - b.seq)));
+      void poll();
     } catch (e: any) {
       toast.error(e.message || "فشل الإرسال");
     } finally { setSending(false); }
+  };
+
+  const togglePrivate = async (m: ChatMessageRow, name: string) => {
+    const makePrivate = !m.private_images.includes(name);
+    setMessages((prev) => prev.map((x) => (x.id === m.id ? { ...x, private_images: makePrivate ? [...x.private_images, name] : x.private_images.filter((n) => n !== name) } : x)));
+    try {
+      const r = await setImagePrivateFn({ data: { chatId: id, messageId: m.id, name, value: makePrivate } });
+      setMessages((prev) => prev.map((x) => (x.id === m.id ? { ...x, private_images: r.private_images } : x)));
+    } catch (e: any) {
+      toast.error(e.message || "حدث خطأ");
+      poll();
+    }
   };
 
   const remove = async (m: ChatMessageRow) => {
@@ -187,11 +220,30 @@ function ChatRoom() {
               {m.text && <div className="whitespace-pre-wrap break-words mt-0.5" dir="auto">{m.text}</div>}
               {m.images.length > 0 && (
                 <div className="flex flex-wrap gap-2 mt-2">
-                  {m.images.map((n, i) => (
-                    <button key={n} type="button" onClick={() => setLightbox({ urls: m.images.map((x) => `/api/chat-image/${x}`), index: i })} title="تكبير الصورة" className="rounded-lg overflow-hidden border border-border hover:border-[var(--gold)] transition">
-                      <img src={`/api/chat-image/${n}`} alt="" loading="lazy" draggable={false} className="block max-h-56 max-w-[min(100%,18rem)] object-cover cursor-zoom-in" />
-                    </button>
-                  ))}
+                  {m.images.map((n, i) => {
+                    const isPriv = m.private_images.includes(n);
+                    const url = `/api/chat-image/${n}`;
+                    return (
+                      <div key={n} className="relative group/img">
+                        <button type="button" onClick={() => setLightbox({ items: m.images.map((x) => ({ url: `/api/chat-image/${x}`, private: m.private_images.includes(x) })), index: i })} title="تكبير الصورة" className="block rounded-lg overflow-hidden border border-border hover:border-[var(--gold)] transition">
+                          {isPriv
+                            ? <PrivateImage src={url} className="block max-h-56 max-w-[min(100%,18rem)] object-cover cursor-zoom-in" />
+                            : <img src={url} alt="" loading="lazy" draggable={false} className="block max-h-56 max-w-[min(100%,18rem)] object-cover cursor-zoom-in" />}
+                        </button>
+                        <div className="absolute top-1.5 left-1.5 flex gap-1 opacity-100 sm:opacity-0 sm:group-hover/img:opacity-100 focus-within:opacity-100 transition">
+                          {!isPriv && (
+                            <a href={`${url}?download=1`} download title="تحميل الصورة" onClick={(e) => e.stopPropagation()} className="h-7 w-7 rounded-md bg-black/60 text-white hover:text-[var(--gold)] flex items-center justify-center"><Download className="h-4 w-4" /></a>
+                          )}
+                          {m.mine && (
+                            <button type="button" onClick={() => togglePrivate(m, n)} title={isPriv ? "خلّي الصورة عادية (يظهر زرار التحميل)" : "خلّي الصورة برايفت (من غير تحميل)"} className="h-7 w-7 rounded-md bg-black/60 text-white hover:text-[var(--gold)] flex items-center justify-center">
+                              {isPriv ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                            </button>
+                          )}
+                        </div>
+                        {isPriv && <span className="pointer-events-none absolute bottom-1.5 right-1.5 inline-flex items-center gap-1 rounded bg-black/70 px-1.5 py-0.5 text-[10px] text-white/80"><EyeOff className="h-3 w-3" />برايفت</span>}
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -205,6 +257,9 @@ function ChatRoom() {
             {pending.map((p) => (
               <div key={p.name} className="relative">
                 <img src={p.preview} alt="" className="h-20 w-20 rounded-lg object-cover border border-border" />
+                <button type="button" onClick={() => setPending((list) => list.map((x) => (x.name === p.name ? { ...x, private: !x.private } : x)))} title={p.private ? "برايفت: من غير تحميل (دوس عشان تخليها عادية)" : "خلّي الصورة برايفت (من غير تحميل)"} className={`absolute bottom-1 left-1 h-6 px-1.5 rounded-md text-[11px] flex items-center gap-1 ${p.private ? "bg-[var(--gold)] text-black" : "bg-black/60 text-white"}`}>
+                  {p.private ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}{p.private ? "برايفت" : "عادية"}
+                </button>
                 <button type="button" onClick={() => dropPending(p)} title="شيل الصورة" className="absolute -top-2 -left-2 h-5 w-5 rounded-full bg-destructive text-white flex items-center justify-center"><X className="h-3 w-3" /></button>
               </div>
             ))}
@@ -238,7 +293,7 @@ function ChatRoom() {
         <button onClick={send} disabled={sending || uploading > 0 || (!text.trim() && pending.length === 0)} className="btn-gold ripple h-11 px-4 inline-flex items-center gap-2 disabled:opacity-40"><Send className="h-4 w-4" />إرسال</button>
       </div>
 
-      {lightbox && <ImageLightbox urls={lightbox.urls} index={lightbox.index} onIndex={(i) => setLightbox({ ...lightbox, index: i })} onClose={() => setLightbox(null)} />}
+      {lightbox && <ImageLightbox items={lightbox.items} index={lightbox.index} onIndex={(i) => setLightbox({ ...lightbox, index: i })} onClose={() => setLightbox(null)} />}
     </div>
   );
 }

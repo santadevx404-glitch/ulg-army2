@@ -2,7 +2,7 @@
 // الصور: بتترفع الأول (بتتسجل باسم الرافع والدردشة)، وبعدين الرسالة بتستهلكها.
 // التخزين عن طريق kv-store (ملفات data/ دلوقتي، وSupabase بعدين).
 import crypto from "node:crypto";
-import { kvGetJSON, kvSetJSON, makeLock } from "./kv-store.server";
+import { kvGetJSON, kvGetJSONShared, kvSetJSON, makeLock } from "./kv-store.server";
 import { makeImageStore } from "./image-store.server";
 
 const CHATS_KEY = "bwd:chats";
@@ -37,11 +37,12 @@ export type ChatMessage = {
   rank: string; // الرتبة وقت الإرسال
   text: string;
   images: string[]; // أسماء ملفات الصور
+  private_images?: string[]; // الصور اللي الكاتب خلاها برايفت (من غير تحميل + حماية من السكرين)
   at: string;
 };
 
 type MsgStore = Record<string, { next: number; messages: ChatMessage[] }>;
-type UploadReg = Record<string, { user_id: string; chat_id: string; used: boolean; at: string }>;
+type UploadReg = Record<string, { user_id: string; chat_id: string; used: boolean; at: string; private?: boolean }>;
 
 const withLock = makeLock();
 
@@ -53,14 +54,7 @@ export function canOpenChat(actor: { owner: boolean; user: { rank_ids: string[] 
 
 async function readChats(): Promise<Chat[]> {
   const raw = await kvGetJSON<{ chats?: Chat[] }>(CHATS_KEY, { chats: [] });
-  return (raw.chats ?? []).map((c) => ({
-    ...c,
-    description: c.description ?? "",
-    rank_ids: c.rank_ids ?? [],
-    rank_display_order: c.rank_display_order ?? [],
-    allow_images: c.allow_images ?? true,
-    enabled: c.enabled ?? true,
-  }));
+  return normalizeChats(raw.chats ?? []);
 }
 async function writeChats(chats: Chat[]) {
   await kvSetJSON(CHATS_KEY, { chats });
@@ -77,13 +71,36 @@ async function readUploads(): Promise<UploadReg> {
 async function writeUploads(u: UploadReg) {
   await kvSetJSON(UPLOADS_KEY, u);
 }
-const withImages = (m: ChatMessage): ChatMessage => ({ ...m, images: m.images ?? [] });
+const withImages = (m: ChatMessage): ChatMessage => ({ ...m, images: m.images ?? [], private_images: (m.private_images ?? []).filter((n) => (m.images ?? []).includes(n)) });
+
+// قراءات للعرض بس (polling): مشتركة بين الطلبات ومتخزنة لحظات قليلة عشان الدردشة متبقاش تقيلة
+async function readMsgsShared(): Promise<MsgStore> {
+  return kvGetJSONShared<MsgStore>(MSGS_KEY, {});
+}
+async function readChatsShared(): Promise<Chat[]> {
+  const raw = await kvGetJSONShared<{ chats?: Chat[] }>(CHATS_KEY, { chats: [] });
+  return normalizeChats(raw.chats ?? []);
+}
+function normalizeChats(list: Chat[]): Chat[] {
+  return list.map((c) => ({
+    ...c,
+    description: c.description ?? "",
+    rank_ids: c.rank_ids ?? [],
+    rank_display_order: c.rank_display_order ?? [],
+    allow_images: c.allow_images ?? true,
+    enabled: c.enabled ?? true,
+  }));
+}
 
 export async function listChats(): Promise<Chat[]> {
   return (await readChats()).sort((a, b) => a.created_at.localeCompare(b.created_at));
 }
 export async function getChat(id: string): Promise<Chat | null> {
   return (await readChats()).find((c) => c.id === id) ?? null;
+}
+/** نفس getChat بس من كاش قصير (للعرض والـ polling بس، مش للتعديل). */
+export async function getChatFast(id: string): Promise<Chat | null> {
+  return (await readChatsShared()).find((c) => c.id === id) ?? null;
 }
 
 export async function messageCounts(): Promise<Record<string, number>> {
@@ -159,11 +176,12 @@ export async function removeRankFromChats(rankId: string): Promise<void> {
   });
 }
 
-export async function listMessages(chatId: string, afterSeq?: number): Promise<ChatMessage[]> {
-  const entry = (await readMsgs())[chatId];
-  if (!entry) return [];
-  if (afterSeq === undefined) return entry.messages.slice(-80).map(withImages);
-  return entry.messages.filter((m) => m.seq > afterSeq).slice(0, 200).map(withImages);
+/** قراءة واحدة بس للرسايل: الجديدة + ids آخر 100 رسالة + الصور البرايفت فيهم (للـ polling). */
+export async function pollMessages(chatId: string, afterSeq?: number): Promise<{ messages: ChatMessage[]; live: { id: string; priv: string[] }[] }> {
+  const all = ((await readMsgsShared())[chatId]?.messages ?? []).map(withImages);
+  const messages = afterSeq === undefined ? all.slice(-80) : all.filter((m) => m.seq > afterSeq).slice(0, 200);
+  const live = all.slice(-100).map((m) => ({ id: m.id, priv: m.private_images ?? [] }));
+  return { messages, live };
 }
 
 export async function postMessage(chatId: string, m: Omit<ChatMessage, "id" | "seq" | "at">): Promise<ChatMessage> {
@@ -173,23 +191,45 @@ export async function postMessage(chatId: string, m: Omit<ChatMessage, "id" | "s
   if (!text && images.length === 0) throw new Error("الرسالة فاضية");
   if (text.length > MAX_MESSAGE_LENGTH) throw new Error(`الرسالة أطول من ${MAX_MESSAGE_LENGTH} حرف`);
   if (images.length > MAX_IMAGES_PER_MESSAGE) throw new Error(`أقصى عدد صور في الرسالة ${MAX_IMAGES_PER_MESSAGE}`);
+  const priv = [...new Set(m.private_images ?? [])].filter((n) => images.includes(n));
   return withLock(async () => {
-    // كل صورة لازم تكون من رفع نفس الشخص في نفس الدردشة ومتستخدمتش قبل كده
-    const uploads = await readUploads();
-    for (const name of images) {
-      const reg = uploads[name];
-      if (!reg || reg.user_id !== m.author_id || reg.chat_id !== chatId || reg.used) throw new Error("صورة غير صالحة، ارفعها تاني");
+    // الرسالة النصية العادية مش محتاجة تلمس سجل الصور خالص (أسرع)
+    const uploads = images.length ? await readUploads() : null;
+    if (uploads) {
+      // كل صورة لازم تكون من رفع نفس الشخص في نفس الدردشة ومتستخدمتش قبل كده
+      for (const name of images) {
+        const reg = uploads[name];
+        if (!reg || reg.user_id !== m.author_id || reg.chat_id !== chatId || reg.used) throw new Error("صورة غير صالحة، ارفعها تاني");
+      }
+      for (const name of images) { uploads[name].used = true; uploads[name].private = priv.includes(name); }
     }
-    for (const name of images) uploads[name].used = true;
     const store = await readMsgs();
     const entry = store[chatId] ?? { next: 1, messages: [] };
-    const msg: ChatMessage = { ...m, text, images, id: crypto.randomUUID(), seq: entry.next, at: new Date().toISOString() };
+    const msg: ChatMessage = { ...m, text, images, private_images: priv, id: crypto.randomUUID(), seq: entry.next, at: new Date().toISOString() };
     entry.next += 1;
     entry.messages = [...entry.messages, msg].slice(-MAX_PER_CHAT);
     store[chatId] = entry;
-    await writeUploads(uploads);
+    if (uploads) await writeUploads(uploads);
     await writeMsgs(store);
     return msg;
+  });
+}
+
+/** الكاتب بس يقدر يخلي صورة من رسايله برايفت أو يرجعها عادية. */
+export async function setImagePrivate(chatId: string, messageId: string, userId: string, name: string, value: boolean): Promise<string[]> {
+  return withLock(async () => {
+    const [store, uploads] = await Promise.all([readMsgs(), readUploads()]);
+    const msg = store[chatId]?.messages.find((x) => x.id === messageId);
+    if (!msg) throw new Error("الرسالة غير موجودة");
+    if (msg.author_id !== userId) throw new Error("بس اللي بعت الصورة يقدر يغيّر خصوصيتها");
+    if (!(msg.images ?? []).includes(name)) throw new Error("الصورة مش في الرسالة دي");
+    const set = new Set(msg.private_images ?? []);
+    if (value) set.add(name); else set.delete(name);
+    msg.private_images = [...set];
+    if (uploads[name]) uploads[name].private = value;
+    await writeUploads(uploads);
+    await writeMsgs(store);
+    return msg.private_images;
   });
 }
 
@@ -244,8 +284,10 @@ export async function registerUpload(name: string, userId: string, chatId: strin
   });
 }
 
-export async function getUpload(name: string): Promise<{ user_id: string; chat_id: string; used: boolean } | null> {
-  return (await readUploads())[name] ?? null;
+export async function getUpload(name: string, fresh = false): Promise<{ user_id: string; chat_id: string; used: boolean; private: boolean } | null> {
+  const all = fresh ? await readUploads() : await kvGetJSONShared<UploadReg>(UPLOADS_KEY, {});
+  const r = all[name];
+  return r ? { user_id: r.user_id, chat_id: r.chat_id, used: r.used, private: !!r.private } : null;
 }
 
 /** الشخص يلغي صورة رفعها ولسه متبعتتش. */

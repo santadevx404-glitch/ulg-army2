@@ -4,12 +4,14 @@ import { motion } from "framer-motion";
 import { useEffect, useState } from "react";
 import {
   Home, Award, Crosshair, Truck, GraduationCap, MapPin,
-  Shield, Menu, X, Settings, LogOut, LogIn, Gauge, ClipboardList, MessageSquare, User, UserPlus,
+  Shield, Menu, X, Settings, LogOut, LogIn, Gauge, ClipboardList, MessageSquare, User, UserPlus, Moon, Sun, Contrast,
 } from "lucide-react";
 import { sectionsQuery } from "@/lib/queries";
 import { logoutFn } from "@/lib/server-fns";
 import { useMe } from "@/lib/use-me";
 import { usePerformanceMode } from "@/lib/performance-mode";
+import { useLightboxOpen } from "@/lib/lightbox-state";
+import { useTheme, type Theme } from "@/lib/theme";
 
 const iconMap: Record<string, React.ComponentType<{ className?: string }>> = {
   Award, Crosshair, Truck, GraduationCap, MapPin, Shield,
@@ -24,6 +26,8 @@ export function Sidebar() {
   const authed = !!me;
   const isAdmin = !!me && me.tabs.length > 0;
   const { lite, setLite } = usePerformanceMode();
+  const { theme, setTheme } = useTheme();
+  const lightboxOpen = useLightboxOpen(); // لما صورة تتفتح السايد بار يدخل جوا البار بتاعه
 
   useEffect(() => { setOpen(false); }, [path]);
 
@@ -43,7 +47,7 @@ export function Sidebar() {
       {/* Mobile toggle */}
       <button
         onClick={() => setOpen((v) => !v)}
-        className="lg:hidden fixed top-4 right-4 z-50 p-2 rounded-md bg-card border border-border ripple"
+        className={`lg:hidden fixed top-4 right-4 z-50 p-2 rounded-md bg-card border border-border ripple transition-opacity ${lightboxOpen ? "opacity-0 pointer-events-none" : ""}`}
         aria-label="القائمة"
       >
         {open ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
@@ -53,9 +57,9 @@ export function Sidebar() {
         initial={false}
         animate={{ x: 0 }}
         className={`fixed top-0 right-0 h-screen w-72 z-40 border-l border-border
-          bg-gradient-to-b from-[oklch(0.2_0.03_80/95%)] to-[oklch(0.14_0.02_80/95%)]
+          bg-gradient-to-b from-[var(--sidebar-from)] to-[var(--sidebar-to)]
           backdrop-blur-xl transition-transform duration-300
-          ${open ? "translate-x-0" : "translate-x-full"} lg:translate-x-0`}
+          ${open ? "translate-x-0" : "translate-x-full"} lg:translate-x-0 ${lightboxOpen ? "sidebar-away" : ""}`}
       >
         <div className="flex flex-col h-full">
           <div className="p-6 border-b border-border">
@@ -97,6 +101,32 @@ export function Sidebar() {
           </nav>
 
           <div className="p-3 border-t border-border space-y-1">
+            <div className="px-1 pb-1">
+              <div className="text-xs text-muted-foreground mb-1.5 px-3">المظهر</div>
+              <div role="radiogroup" aria-label="المظهر" className="grid grid-cols-3 gap-1 rounded-lg border border-border p-1">
+                {([
+                  { id: "dark", label: "داكن", icon: Moon },
+                  { id: "normal", label: "عادي", icon: Contrast },
+                  { id: "light", label: "فاتح", icon: Sun },
+                ] as { id: Theme; label: string; icon: React.ComponentType<{ className?: string }> }[]).map((t) => {
+                  const on = theme === t.id;
+                  const Icon = t.icon;
+                  return (
+                    <button
+                      key={t.id}
+                      type="button"
+                      role="radio"
+                      aria-checked={on}
+                      onClick={() => setTheme(t.id)}
+                      title={`المظهر ${t.label}`}
+                      className={`flex flex-col items-center gap-0.5 rounded-md py-1.5 text-xs transition-colors ${on ? "bg-[var(--gold)] text-[oklch(0.15_0.02_80)] font-bold" : "text-foreground/70 hover:text-foreground hover:bg-white/5"}`}
+                    >
+                      <Icon className="h-4 w-4" />{t.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
             <button
               onClick={() => setLite(!lite)}
               className={`w-full flex items-center justify-between gap-3 px-4 py-2.5 rounded-lg text-sm transition-colors

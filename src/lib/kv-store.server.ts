@@ -187,7 +187,24 @@ export async function kvGetJSON<T>(key: string, fallback: T): Promise<T> {
   return row ? (row.value as T) : fallback;
 }
 
+// قراءة "للعرض بس" مشتركة بين كل الطلبات في نفس السيرفر: لو 50 شخص بيعملوا polling للدردشة،
+// بدل 50 قراءة من Supabase كل ثانية بنقرا مرة واحدة ونوزّع النتيجة. أي كتابة بتمسح الكاش فورًا.
+// ممنوع استخدامها جوه عمليات "اقرأ ← عدّل ← اكتب" (استخدم kvGetJSON هناك).
+const sharedCache = new Map<string, { at: number; p: Promise<unknown> }>();
+
+export function kvGetJSONShared<T>(key: string, fallback: T, ttlMs = 700): Promise<T> {
+  if (USE_LOCAL_STORAGE) return Promise.resolve(localRead(key, fallback));
+  const hit = sharedCache.get(key);
+  if (hit && Date.now() - hit.at < ttlMs) return hit.p as Promise<T>;
+  const p = remoteRead(key).then((row) => (row ? (row.value as T) : fallback));
+  const entry = { at: Date.now(), p };
+  sharedCache.set(key, entry);
+  p.catch(() => { if (sharedCache.get(key) === entry) sharedCache.delete(key); });
+  return p;
+}
+
 export async function kvSetJSON(key: string, value: unknown): Promise<void> {
+  sharedCache.delete(key);
   if (USE_LOCAL_STORAGE) return localWrite(key, value);
   const tx = txStore.getStore();
   if (!tx) return kvTransaction(() => kvSetJSON(key, value)); // كتابة لوحدها: بتتعمل كمعاملة صغيرة

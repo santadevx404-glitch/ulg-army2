@@ -7,6 +7,10 @@
 import { defineConfig } from "@lovable.dev/vite-tanstack-config";
 
 export default defineConfig({
+  vite: {
+    // بدون source maps: في النسخة المبنية (npm start) F12 → Sources مبيعرضش ملفات الكود الأصلية، بس ملفات JS مضغوطة.
+    build: { sourcemap: false },
+  },
   tanstackStart: {
     // Redirect TanStack Start's bundled server entry to src/server.ts (our SSR error wrapper).
     // nitro/vite builds from this

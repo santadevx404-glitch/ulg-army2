@@ -27,7 +27,7 @@ function shownRank(c: chat.Chat, userRankIds: string[], ranks: access.Rank[]): s
 const canOpen = chat.canOpenChat;
 
 async function openChatFor(actor: access.Actor, chatId: string): Promise<chat.Chat> {
-  const c = await chat.getChat(chatId);
+  const c = await chat.getChatFast(chatId);
   if (!c) throw new Error("الدردشة غير موجودة");
   if (!canOpen(actor, c)) throw new Error("الدردشة دي مقفولة، محتاج رتبتها");
   return c;
@@ -69,6 +69,7 @@ export type ChatMessageRow = {
   text: string;
   at: string;
   images: string[];
+  private_images: string[]; // الصور البرايفت (من غير تحميل، وبتتحمي من السكرين)
   mine: boolean;
   can_delete: boolean;
 };
@@ -76,34 +77,45 @@ export type ChatMessageRow = {
 export const chatMessagesFn = createServerFn({ method: "POST" })
   .validator((d: { chatId: string; after?: number }) => d)
   .handler(async ({ data }) => {
-    const actor = await requireActor();
-    const c = await openChatFor(actor, data.chatId);
-    const [msgs, users, ids, ranks] = await Promise.all([
-      chat.listMessages(c.id, typeof data.after === "number" ? data.after : undefined),
-      auth.listUsers(),
-      chat.liveIds(c.id),
-      access.listRanks(),
+    // كل القراءات الأساسية بالتوازي (بدل ما كل واحدة تستنى اللي قبلها) — ده أهم سبب للتأخير
+    const [actor, c, polled] = await Promise.all([
+      requireActor(),
+      chat.getChatFast(data.chatId),
+      chat.pollMessages(data.chatId, typeof data.after === "number" ? data.after : undefined),
     ]);
-    const avatars = new Map(users.map((u) => [u.id, u.avatar]));
-    // الرتبة اللي بتظهر جنب الاسم = أعلى رتبة (حسب ترتيب الرتب) عند الشخص دلوقتي. لو ملوش رتب بنستخدم اللي اتسجلت وقت الإرسال.
-    const topRank = new Map<string, string>();
-    for (const u of users) {
-      if (auth.isOwner(u)) continue;
-      const name = shownRank(c, u.rank_ids, ranks); // الترتيب المخصص للدردشة دي، وإلا العام
-      if (name) topRank.set(u.id, name);
+    if (!c) throw new Error("الدردشة غير موجودة");
+    if (!canOpen(actor, c)) throw new Error("الدردشة دي مقفولة، محتاج رتبتها");
+    const ranks = await access.listRanks();
+    const rankNames = c.rank_ids.map((id) => ranks.find((r) => r.id === id)?.name).filter((n): n is string => !!n);
+
+    let messages: ChatMessageRow[] = [];
+    if (polled.messages.length > 0) {
+      // بيانات الكتّاب (الصورة والرتبة) محتاجينها للرسايل الجديدة بس
+      const users = await auth.listUsers();
+      const avatars = new Map(users.map((u) => [u.id, u.avatar]));
+      const topRank = new Map<string, string>();
+      for (const u of users) {
+        if (auth.isOwner(u)) continue;
+        const name = shownRank(c, u.rank_ids, ranks);
+        if (name) topRank.set(u.id, name);
+      }
+      const canModerate = access.can(actor, "chats.moderate.delete_message", { chat: c.id });
+      messages = polled.messages.map((m) => ({
+        ...m,
+        private_images: m.private_images ?? [],
+        avatar: avatars.get(m.author_id) ?? null,
+        rank: topRank.get(m.author_id) ?? m.rank,
+        mine: m.author_id === actor.user.id,
+        can_delete: m.author_id === actor.user.id || canModerate,
+      }));
     }
-    const canModerate = access.can(actor, "chats.moderate.delete_message", { chat: c.id });
-    const messages: ChatMessageRow[] = msgs.map((m) => ({
-      ...m,
-      avatar: avatars.get(m.author_id) ?? null,
-      rank: topRank.get(m.author_id) ?? m.rank,
-      mine: m.author_id === actor.user.id,
-      can_delete: m.author_id === actor.user.id || canModerate,
-    }));
+    const priv: Record<string, string[]> = {};
+    for (const l of polled.live) if (l.priv.length) priv[l.id] = l.priv;
     return {
-      chat: { id: c.id, name: c.name, description: c.description, allow_images: c.allow_images, rank_names: c.rank_ids.map((id) => ranks.find((r) => r.id === id)?.name).filter((n): n is string => !!n) },
+      chat: { id: c.id, name: c.name, description: c.description, allow_images: c.allow_images, rank_names: rankNames },
       messages,
-      live_ids: ids,
+      live_ids: polled.live.map((l) => l.id),
+      private_map: priv, // الصور البرايفت في آخر 100 رسالة (عشان تتحدّث عند الكل لو الكاتب غيّرها)
       can_clear: access.can(actor, "chats.moderate.clear", { chat: c.id }),
     };
   });
@@ -112,8 +124,8 @@ export const chatMessagesFn = createServerFn({ method: "POST" })
 const sent = new Map<string, number[]>();
 
 export const sendMessageFn = createServerFn({ method: "POST" })
-  .validator((d: { chatId: string; text?: string; images?: string[] }) => d)
-  .handler(async ({ data }) => {
+  .validator((d: { chatId: string; text?: string; images?: string[]; privateImages?: string[] }) => d)
+  .handler(async ({ data }): Promise<ChatMessageRow> => {
     const actor = await requireActor();
     const c = await openChatFor(actor, data.chatId);
     const images = data.images ?? [];
@@ -128,15 +140,27 @@ export const sendMessageFn = createServerFn({ method: "POST" })
     const u = actor.user;
     // الرتبة اللي بتظهر جنب الاسم = أعلى رتبة عند الشخص (حسب ترتيب الرتب اللي الأدمن حدده)
     const rank = actor.owner ? u.display_title || "الأدمن الأساسي" : (shownRank(c, u.rank_ids, await access.listRanks()) ?? "");
+    const shownRankName = actor.owner && !u.character_name ? "" : rank;
     const msg = await chat.postMessage(c.id, {
       author_id: u.id,
       code: u.military_code,
       character: u.character_name || (actor.owner ? u.display_title || "الأدمن الأساسي" : u.account_name),
-      rank: actor.owner && !u.character_name ? "" : rank,
+      rank: shownRankName,
       text: data.text ?? "",
       images,
+      private_images: data.privateImages ?? [],
     });
-    return { id: msg.id, seq: msg.seq };
+    // بنرجّع الرسالة كاملة عشان تظهر عند الكاتب فورًا من غير ما يستنى polling
+    return { ...msg, private_images: msg.private_images ?? [], avatar: u.avatar ?? null, rank: shownRankName, mine: true, can_delete: true };
+  });
+
+export const setImagePrivateFn = createServerFn({ method: "POST" })
+  .validator((d: { chatId: string; messageId: string; name: string; value: boolean }) => d)
+  .handler(async ({ data }) => {
+    const actor = await requireActor();
+    const c = await openChatFor(actor, data.chatId);
+    const priv = await chat.setImagePrivate(c.id, data.messageId, actor.user.id, data.name, !!data.value);
+    return { private_images: priv };
   });
 
 export const deleteMessageFn = createServerFn({ method: "POST" })

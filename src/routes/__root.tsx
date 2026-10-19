@@ -15,6 +15,7 @@ import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
 import { PerformanceModeProvider, usePerformanceMode } from "@/lib/performance-mode";
 import { useContentProtection } from "@/lib/content-protection";
+import { ThemeProvider, THEME_INIT_SCRIPT, useTheme } from "@/lib/theme";
 import { Sidebar } from "@/components/Sidebar";
 import { AnimatedBackground } from "@/components/AnimatedBackground";
 import { Footer } from "@/components/Footer";
@@ -67,6 +68,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { property: "og:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/1a8d549c-b836-44c4-9b51-210384bd42c2/id-preview-6f7ea96d--acfca38e-dea0-4ab1-bb35-132f8d2025b8.lovable.app-1784769808299.png" },
       { name: "twitter:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/1a8d549c-b836-44c4-9b51-210384bd42c2/id-preview-6f7ea96d--acfca38e-dea0-4ab1-bb35-132f8d2025b8.lovable.app-1784769808299.png" },
     ],
+    scripts: [{ children: THEME_INIT_SCRIPT }],
     links: [
       { rel: "stylesheet", href: appCss },
       { rel: "icon", href: "/favicon.ico", type: "image/x-icon" },
@@ -83,7 +85,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
 
 function RootShell({ children }: { children: ReactNode }) {
   return (
-    <html lang="ar" dir="rtl">
+    <html lang="ar" dir="rtl" suppressHydrationWarning>
       <head><HeadContent /></head>
       <body>{children}<Scripts /></body>
     </html>
@@ -93,16 +95,19 @@ function RootShell({ children }: { children: ReactNode }) {
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
   return (
-    <PerformanceModeProvider>
-      <QueryClientProvider client={queryClient}>
-        <RootContent />
-      </QueryClientProvider>
-    </PerformanceModeProvider>
+    <ThemeProvider>
+      <PerformanceModeProvider>
+        <QueryClientProvider client={queryClient}>
+          <RootContent />
+        </QueryClientProvider>
+      </PerformanceModeProvider>
+    </ThemeProvider>
   );
 }
 
 function RootContent() {
   const { lite } = usePerformanceMode();
+  const { theme } = useTheme();
   useContentProtection();
   return (
     <MotionConfig reducedMotion={lite ? "always" : "user"}>
@@ -115,7 +120,7 @@ function RootContent() {
         </div>
         <Footer />
       </main>
-      <Toaster position="top-center" richColors theme="dark" />
+      <Toaster position="top-center" richColors theme={theme === "light" ? "light" : "dark"} />
     </MotionConfig>
   );
 }
