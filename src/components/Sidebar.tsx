@@ -38,7 +38,7 @@ export function Sidebar() {
       label: s.name,
       icon: (s.icon && iconMap[s.icon]) || Shield,
     })),
-    ...(authed ? [{ to: "/exams" as const, label: "الاختبارات", icon: ClipboardList }] : []),
+    { to: "/exams" as const, label: "الاختبارات", icon: ClipboardList },
     ...(authed ? [{ to: "/chat" as const, label: "الدردشات", icon: MessageSquare }] : []),
   ];
 

@@ -162,7 +162,9 @@ export const sectionBySlugFn = createServerFn({ method: "GET" })
 export const unlockSectionFn = createServerFn({ method: "POST" })
   .validator((d: { slug: string; password: string }) => d)
   .handler(async ({ data }) => {
-    const items = await store.unlockSection(data.slug, data.password, await getViewer());
+    const viewer = await getViewer();
+    if (!viewer) return { error: "سجّل دخولك الأول" };
+    const items = await store.unlockSection(data.slug, data.password, viewer);
     if (items === null) return { error: "كلمة السر غلط" };
     return { items };
   });

@@ -1,5 +1,7 @@
 import { useState } from "react";
-import { Lock, Loader2 } from "lucide-react";
+import { Link } from "@tanstack/react-router";
+import { Lock, Loader2, LogIn } from "lucide-react";
+import { useMe } from "@/lib/use-me";
 
 export function MiniPasswordGate({
   title,
@@ -12,6 +14,9 @@ export function MiniPasswordGate({
 }) {
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const { me, loading } = useMe();
+  // المحتوى للمسجّلين بس — الزائر بيتطلب منه تسجيل الدخول الأول
+  if (!loading && !me) return <LoginRequired title={title} />;
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -39,6 +44,17 @@ export function MiniPasswordGate({
           {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : "دخول"}
         </button>
       </form>
+    </div>
+  );
+}
+
+export function LoginRequired({ title }: { title?: string }) {
+  return (
+    <div className="p-10 text-center">
+      <LogIn className="h-10 w-10 mx-auto text-[var(--gold)] mb-4" />
+      {title && <h2 className="text-xl font-bold mb-1">{title}</h2>}
+      <p className="text-sm text-muted-foreground mb-6">سجّل دخولك الأول عشان تقدر تشوف المحتوى.</p>
+      <Link to="/auth" className="btn-gold ripple inline-block">تسجيل الدخول</Link>
     </div>
   );
 }

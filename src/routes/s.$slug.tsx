@@ -8,6 +8,8 @@ import { unlockSectionFn } from "@/lib/server-fns";
 import { ItemModal } from "@/components/ItemModal";
 import { CourseTopicsModal } from "@/components/CourseTopicsModal";
 import { FormattedText } from "@/lib/formatted-text";
+import { useMe } from "@/lib/use-me";
+import { LoginRequired } from "@/components/MiniPasswordGate";
 
 export const Route = createFileRoute("/s/$slug")({
   loader: async ({ params, context }) => {
@@ -117,6 +119,8 @@ function PasswordGate({ slug, onUnlock }: { slug: string; onUnlock: (items: any[
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { me, loading: meLoading } = useMe();
+  if (!meLoading && !me) return <div className="max-w-sm mx-auto py-16"><div className="mil-card"><LoginRequired title="هذا القسم للمسجّلين" /></div></div>;
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();

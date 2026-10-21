@@ -129,14 +129,16 @@ export async function getSectionWithItems(
   const items = db.items
     .filter((i) => i.section_id === raw.id && i.published)
     .sort((a, b) => a.sort_order - b.sort_order || b.created_at.localeCompare(a.created_at))
-    .map((i) => sanitizeItem(i, viewer));
+    .map((i) => sanitizeItem(i, viewer))
+    // الزائر (من غير تسجيل دخول) بيشوف العناوين والأوصاف المختصرة بس — المحتوى نفسه لازم تسجيل دخول
+    .map((i) => (viewer ? i : { ...i, full_description: null, gallery: [] }));
   return { section, items };
 }
 
 export async function unlockSection(slug: string, password: string, viewer: Viewer = null): Promise<PublicItem[] | null> {
   const db = await readDb();
   const raw = db.sections.find((s) => s.slug === slug);
-  if (!raw) return null;
+  if (!raw || !viewer) return null; // لازم تسجيل دخول
   if (raw.password && raw.password !== password && !bypasses(viewer, raw.bypass)) return null;
   return db.items
     .filter((i) => i.section_id === raw.id && i.published)
@@ -198,6 +200,8 @@ export async function getItemWithSection(
   const item = db.items.find((i) => i.id === id);
   if (!item) return null;
   const section = db.sections.find((s) => s.id === item.section_id);
+  // الزائر من غير تسجيل دخول مبيشوفش المحتوى (الواجهة بتطلب منه تسجيل الدخول)
+  if (!viewer) return { locked: true, id: item.id, title: item.title, section_name: section?.name ?? "" };
   if (item.password && item.password !== password && !bypasses(viewer, item.bypass)) {
     return { locked: true, id: item.id, title: item.title, section_name: section?.name ?? "" };
   }

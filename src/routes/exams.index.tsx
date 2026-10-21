@@ -1,5 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import { ClipboardList, Clock, CalendarX, ArrowLeft, Lock, KeyRound, Award } from "lucide-react";
@@ -54,18 +54,13 @@ function SecretCodeBox() {
 }
 
 function ExamsIndex() {
-  const navigate = useNavigate();
   const { me, loading } = useMe();
-  // الاختبارات للمسجّلين بس
-  useEffect(() => {
-    if (!loading && !me) navigate({ to: "/auth" });
-  }, [loading, me, navigate]);
+  // القايمة ظاهرة للكل، لكن فتح أي اختبار محتاج تسجيل دخول
   const { data: exams, isLoading } = useQuery({
     queryKey: ["public-exams", me?.id ?? null],
     queryFn: () => publicExamsFn(),
-    enabled: !!me,
+    enabled: !loading,
   });
-  if (loading || !me) return <div className="p-16 text-center text-muted-foreground">جارٍ التحميل...</div>;
 
   return (
     <div className="p-6 md:p-10 max-w-5xl mx-auto">
@@ -74,7 +69,7 @@ function ExamsIndex() {
           <div className="text-sm text-muted-foreground mb-2">حرس الحدود</div>
           <div className="flex flex-wrap items-center justify-between gap-4">
             <h1 className="text-4xl md:text-5xl font-black gold-text">الاختبارات</h1>
-            <Link to="/exams/results" className="btn-gold ripple inline-flex items-center gap-2"><Award className="h-4 w-4" />نتائج اختباراتي</Link>
+            {me && <Link to="/exams/results" className="btn-gold ripple inline-flex items-center gap-2"><Award className="h-4 w-4" />نتائج اختباراتي</Link>}
           </div>
         </div>
       </motion.div>
