@@ -87,6 +87,7 @@ export type Attempt = {
   user_id: string | null; // صاحب الحساب (الاختبارات للمسجلين بس)
   fields: Record<string, string>;
   scores: Record<string, number>; // درجات التصحيح اليدوي لكل سؤال
+  feedback: Record<string, string>; // الإجابة الصح/تعليق المصحح لكل سؤال درجته أقل من الكامل
   graded_at: string | null; // وقت ما الأدمن حفظ التصحيح
   graded_by: string | null;
   token: string;
@@ -167,6 +168,7 @@ async function readAttemptsDb(): Promise<AttemptsDB> {
       images: a.images ?? {},
       user_id: a.user_id ?? null,
       scores: a.scores ?? {},
+      feedback: a.feedback ?? {},
       graded_at: a.graded_at ?? null,
       graded_by: a.graded_by ?? null,
       questions: (a.questions ?? []).map((q) => ({ ...q, image_mode: q.image_mode ?? "none", max_images: q.max_images ?? 3, points: typeof q.points === "number" ? q.points : 1 })),
@@ -513,6 +515,7 @@ export async function startExam(examId: string, user: ExamUser, accessToken?: st
       user_id: user.id,
       fields,
       scores: {},
+      feedback: {},
       graded_at: null,
       graded_by: null,
       token: crypto.randomBytes(24).toString("hex"),
@@ -768,7 +771,7 @@ function isReleased(att: Attempt, g: AttemptGrade): boolean {
 }
 
 /** حفظ تصحيح محاولة: درجة لكل سؤال (0 → الحد الأقصى للسؤال). الأسئلة اللي مفيهاش درجة بتتحسب 0. */
-export async function adminGradeAttempt(id: string, scores: Record<string, unknown>, gradedBy: string): Promise<{ total: number; max: number }> {
+export async function adminGradeAttempt(id: string, scores: Record<string, unknown>, feedback: Record<string, unknown>, gradedBy: string): Promise<{ total: number; max: number }> {
   return withLock(async () => {
     const attemptsDb = await readAttemptsDb();
     const att = attemptsDb.attempts.find((a) => a.id === id);
@@ -790,12 +793,30 @@ export async function adminGradeAttempt(id: string, scores: Record<string, unkno
     // أي سؤال لسه من غير درجة (نصي لم يتصحح) بيتحسب صفر عند الحفظ
     const after = gradeAttempt(att, exam, live);
     for (const it of after.items) if (it.score === null) att.scores[it.id] = 0;
+    // أي سؤال درجته أقل من الكاملة (ومش متصحح تلقائي) لازم له الإجابة الصح مكتوبة
+    const fb: Record<string, string> = {};
+    const final0 = gradeAttempt(att, exam, live);
+    for (const [i, it] of final0.items.entries()) {
+      const text = String(feedback?.[it.id] ?? "").trim().slice(0, 5000);
+      if ((it.score ?? 0) < it.max && !it.auto) {
+        if (!text) throw new Error(`اكتب الإجابة الصح للسؤال ${i + 1} (درجته أقل من الكاملة)`);
+      }
+      if (text && (it.score ?? 0) < it.max) fb[it.id] = text;
+    }
+    att.feedback = fb;
     att.graded_at = new Date().toISOString();
     att.graded_by = gradedBy;
     await writeAttemptsDb(attemptsDb);
     const final = gradeAttempt(att, exam, live);
     return { total: final.total, max: final.max };
   });
+}
+
+function verdictOf(score: number, max: number): MyResultItem["verdict"] {
+  if (score >= max) return "correct";
+  if (score <= 0) return "wrong";
+  const r = score / max;
+  return r > 0.5 ? "above" : r === 0.5 ? "half" : "below";
 }
 
 export type MyResultItem = {
@@ -806,7 +827,8 @@ export type MyResultItem = {
   answer: string;
   max: number;
   score: number;
-  verdict: "correct" | "partial" | "wrong";
+  verdict: "correct" | "above" | "half" | "below" | "wrong"; // كاملة | فوق النص | النص | تحت النص | صفر
+  feedback: string | null; // الإجابة الصح / تعليق المصحح (لو الإجابة مش كاملة)
 };
 export type MyResult = {
   attempt_id: string;
@@ -852,7 +874,8 @@ export async function myResults(userId: string): Promise<MyResult[]> {
               answer: a.answers[sq.id] ?? "",
               max: sq.points,
               score,
-              verdict: score >= sq.points ? "correct" : score > 0 ? "partial" : "wrong",
+              verdict: verdictOf(score, sq.points),
+              feedback: score >= sq.points ? null : a.feedback[sq.id] || (g.items[i].auto ? live.get(sq.id)?.correct_answer ?? null : null),
             } satisfies MyResultItem;
           })
         : [],
@@ -1167,6 +1190,7 @@ export type AdminAttemptDetail = {
     correct_answer: string | null;
     score: number | null;
     auto: boolean; // الدرجة اتحسبت تلقائي
+    feedback: string;
   }[];
   total: number;
   max: number;
@@ -1197,6 +1221,7 @@ export async function adminGetAttempt(id: string): Promise<AdminAttemptDetail | 
         correct_answer: live?.correct_answer ?? null,
         score: g.items[i].score,
         auto: g.items[i].auto,
+        feedback: att.feedback[sq.id] ?? "",
         id: sq.id,
         type: sq.type,
         text: sq.text,

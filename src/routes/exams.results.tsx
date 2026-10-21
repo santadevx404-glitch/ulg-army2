@@ -12,6 +12,15 @@ export const Route = createFileRoute("/exams/results")({
   component: ResultsPage,
 });
 
+// ألوان ونصوص كل مستوى: كاملة (أخضر) • فوق النص (أصفر مخضر) • النص (أصفر ذهبي) • تحت النص (أصفر محمر) • صفر (أحمر)
+const V: Record<MyResult["items"][number]["verdict"], { label: string; box: string; text: string }> = {
+  correct: { label: "إجابة صحيحة", box: "border-emerald-500/40 bg-emerald-500/5", text: "text-emerald-500" },
+  above: { label: "إجابة مقبولة لكن غير دقيقة", box: "border-lime-500/50 bg-lime-500/10", text: "text-lime-500" },
+  half: { label: "إجابة شبه مقبولة لكن غير دقيقة", box: "border-yellow-500/50 bg-yellow-500/10", text: "text-yellow-500" },
+  below: { label: "إجابة غير مقبولة لكن أقرب من الإجابة الصحيحة", box: "border-orange-500/50 bg-orange-500/10", text: "text-orange-500" },
+  wrong: { label: "إجابة خاطئة", box: "border-destructive/40 bg-destructive/5", text: "text-destructive" },
+};
+
 const fmtDate = (iso: string | null) => (iso ? new Date(iso).toLocaleString("ar-EG", { dateStyle: "medium", timeStyle: "short" }) : "");
 const num = (n: number) => String(Math.round(n * 100) / 100);
 
@@ -69,10 +78,10 @@ function ResultCard({ r }: { r: MyResult }) {
       {open && (
         <div className="mt-5 space-y-3 border-t border-border pt-5">
           {r.items.map((it, i) => (
-            <div key={it.id} className={`rounded-lg border p-4 ${it.verdict === "correct" ? "border-emerald-500/40 bg-emerald-500/5" : it.verdict === "partial" ? "border-amber-500/40 bg-amber-500/5" : "border-destructive/40 bg-destructive/5"}`}>
+            <div key={it.id} className={`rounded-lg border p-4 ${V[it.verdict].box}`}>
               <div className="flex items-start gap-3">
                 <div className="mt-0.5 shrink-0">
-                  {it.verdict === "correct" ? <CheckCircle2 className="h-5 w-5 text-emerald-500" /> : it.verdict === "partial" ? <MinusCircle className="h-5 w-5 text-amber-500" /> : <XCircle className="h-5 w-5 text-destructive" />}
+                  {it.verdict === "correct" ? <CheckCircle2 className={`h-5 w-5 ${V.correct.text}`} /> : it.verdict === "wrong" ? <XCircle className={`h-5 w-5 ${V.wrong.text}`} /> : <MinusCircle className={`h-5 w-5 ${V[it.verdict].text}`} />}
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="text-xs text-muted-foreground mb-1">سؤال {i + 1}</div>
@@ -84,9 +93,13 @@ function ResultCard({ r }: { r: MyResult }) {
                 </div>
                 <div className="text-sm font-bold shrink-0" dir="ltr">{num(it.score)} / {num(it.max)}</div>
               </div>
-              <div className="text-xs mt-2 mr-8 text-muted-foreground">
-                {it.verdict === "correct" ? "إجابة صحيحة" : it.verdict === "partial" ? "إجابة جزئية" : "إجابة خاطئة"}
-              </div>
+              <div className={`text-xs mt-2 mr-8 font-bold ${V[it.verdict].text}`}>{V[it.verdict].label}</div>
+              {it.feedback && (
+                <div className="mt-3 mr-8 rounded-md border border-[var(--gold)]/40 bg-[var(--gold)]/10 p-3 text-sm">
+                  <div className="text-xs text-[var(--gold)] font-bold mb-1">الإجابة الصحيحة</div>
+                  <div className="whitespace-pre-wrap leading-loose">{it.feedback}</div>
+                </div>
+              )}
             </div>
           ))}
         </div>

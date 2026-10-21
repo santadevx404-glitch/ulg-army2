@@ -541,6 +541,7 @@ function AttemptModal({ id, canGrade, onClose }: { id: string; canGrade: boolean
   const qc = useQueryClient();
   const { data, isLoading } = useQuery({ queryKey: ["admin-attempt", id], queryFn: () => adminAttemptFn({ data: id }) });
   const [scores, setScores] = useState<Record<string, string>>({});
+  const [fbs, setFbs] = useState<Record<string, string>>({});
   const [init, setInit] = useState(false);
   const [saving, setSaving] = useState(false);
 
@@ -549,6 +550,7 @@ function AttemptModal({ id, canGrade, onClose }: { id: string; canGrade: boolean
     const o: Record<string, string> = {};
     for (const it of data.items) if (it.score !== null) o[it.id] = String(it.score);
     setScores(o);
+    setFbs(Object.fromEntries(data.items.filter((it) => it.feedback).map((it) => [it.id, it.feedback])));
     setInit(true);
   }
 
@@ -562,9 +564,17 @@ function AttemptModal({ id, canGrade, onClose }: { id: string; canGrade: boolean
       const v = scores[it.id];
       if (v !== undefined && v !== "" && (Number(v) < 0 || Number(v) > it.points)) return toast.error(`درجة السؤال لازم بين 0 و ${it.points}`);
     }
+    for (const [i, it] of data.items.entries()) {
+      const v = scores[it.id];
+      const sc = v === undefined || v === "" ? (it.score ?? 0) : Number(v);
+      const autoOk = it.auto && v === undefined;
+      if (sc < it.points && !autoOk && !(fbs[it.id] ?? "").trim() && !(it.type === "choice" && it.auto && it.correct_answer)) {
+        return toast.error(`اكتب الإجابة الصح للسؤال ${i + 1} (درجته أقل من الكاملة)`);
+      }
+    }
     setSaving(true);
     try {
-      const r = await adminGradeAttemptFn({ data: { id, scores } });
+      const r = await adminGradeAttemptFn({ data: { id, scores, feedback: fbs } });
       toast.success(`اتحفظ التصحيح: ${r.total}/${r.max}`);
       qc.invalidateQueries({ queryKey: ["admin-attempt", id] });
       qc.invalidateQueries({ queryKey: ["admin-attempts"] });
@@ -605,6 +615,19 @@ function AttemptModal({ id, canGrade, onClose }: { id: string; canGrade: boolean
                 <div className={`whitespace-pre-wrap rounded-md p-3 ${it.answer.trim() ? "bg-white/5" : "bg-destructive/10 text-destructive text-sm"}`}>
                   {it.answer.trim() || (it.images.length ? "(من غير نص — في صور)" : "(من غير إجابة)")}
                 </div>
+                {gradable && (() => {
+                  const v = scores[it.id];
+                  const sc = v === undefined || v === "" ? (it.score ?? 0) : Number(v);
+                  const autoWrong = it.auto && it.type === "choice" && !!it.correct_answer;
+                  if (sc >= it.points || autoWrong) return null;
+                  return (
+                    <div className="mt-3">
+                      <label className="text-xs text-destructive block mb-1">الدرجة أقل من الكاملة — اكتب الإجابة الصح (بتظهر للطالب) *</label>
+                      <textarea className="input min-h-16" value={fbs[it.id] ?? ""} onChange={(e) => setFbs({ ...fbs, [it.id]: e.target.value })} />
+                    </div>
+                  );
+                })()}
+                {!gradable && it.feedback && <div className="mt-2 text-sm text-emerald-500 whitespace-pre-wrap">الإجابة الصح المكتوبة للطالب: {it.feedback}</div>}
                 {it.type === "choice" && it.correct_answer && (
                   <div className={`mt-2 text-sm flex items-center gap-1 ${it.answer.trim() === it.correct_answer ? "text-emerald-500" : "text-destructive"}`}>
                     {it.answer.trim() === it.correct_answer ? <CheckCircle2 className="h-4 w-4" /> : <XCircle className="h-4 w-4" />}

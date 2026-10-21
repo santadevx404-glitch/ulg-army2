@@ -238,12 +238,12 @@ export const adminAttemptFn = createServerFn({ method: "GET" })
   });
 
 export const adminGradeAttemptFn = createServerFn({ method: "POST" })
-  .validator((d: { id: string; scores: Record<string, number | string | null> }) => d)
+  .validator((d: { id: string; scores: Record<string, number | string | null>; feedback?: Record<string, string> }) => d)
   .handler(async ({ data }) => {
     const actor = await requireActor();
     const examIds = await exams.examIdsForAttempts([data.id]);
     assertExams(actor, "exams.review.grade", examIds);
-    const res = await exams.adminGradeAttempt(data.id, data.scores ?? {}, actor.user.account_name || actor.user.email);
+    const res = await exams.adminGradeAttempt(data.id, data.scores ?? {}, data.feedback ?? {}, actor.user.account_name || actor.user.email);
     const note = await describeAttempts([data.id]);
     await audit.logAdmin(actor, { category: "attempts", action: "attempt.grade", summary: `صحّح تسليم (${res.total}/${res.max})`, note });
     return res;
