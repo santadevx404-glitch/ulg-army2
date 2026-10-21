@@ -1,9 +1,10 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { motion } from "framer-motion";
 import { AlertTriangle, CheckCircle2, Clock, ImagePlus, Loader2, Lock, Send, ShieldAlert, Timer, X } from "lucide-react";
 import { publicExamFn, startExamFn, pollExamFn, saveAnswersFn, unlockExamFn } from "@/lib/exam-fns";
+import { useMe } from "@/lib/use-me";
 import type { PublicExamInfo, ServedQuestion, StartResult } from "@/lib/exams.server";
 
 export const Route = createFileRoute("/exams/$id")({
@@ -25,9 +26,14 @@ type Phase =
 
 function ExamPage() {
   const { id } = Route.useParams();
+  const navigate = useNavigate();
+  const { me, loading: meLoading } = useMe();
+  // الاختبارات للمسجّلين بس — بياناتك بتتاخد من حسابك
+  useEffect(() => {
+    if (!meLoading && !me) navigate({ to: "/auth" });
+  }, [meLoading, me, navigate]);
   const [info, setInfo] = useState<PublicExamInfo | null>(null);
   const [phase, setPhase] = useState<Phase>({ k: "loading" });
-  const [values, setValues] = useState<Record<string, string>>({});
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState("");
   // توكن فتح الاختبار المقفول/المشفّر (بيتحفظ لحد ما التاب يتقفل)
@@ -40,7 +46,7 @@ function ExamPage() {
   }, [id]);
 
   useEffect(() => {
-    if (!tokenLoaded) return;
+    if (!tokenLoaded || !me) return;
     (async () => {
       const r = await publicExamFn({ data: { id, token } });
       if (r.state === "unavailable") return setPhase({ k: "missing" });
@@ -48,10 +54,15 @@ function ExamPage() {
         if (token) { try { sessionStorage.removeItem(`examAccess:${id}`); } catch { /* ignore */ } setToken(null); }
         return setPhase({ k: "gate", title: r.title });
       }
+      // مستثنى من كلمة السر: السيرفر بيدّيه توكن الدخول من غير ما يكتب حاجة
+      if (r.token && !token) {
+        try { sessionStorage.setItem(`examAccess:${id}`, r.token); } catch { /* ignore */ }
+        setToken(r.token);
+      }
       setInfo(r.info);
       setPhase((p) => (p.k === "loading" || p.k === "gate" ? { k: "intake" } : p));
     })().catch(() => setPhase({ k: "missing" }));
-  }, [id, token, tokenLoaded]);
+  }, [id, token, tokenLoaded, me]);
 
   const applyResult = useCallback((r: StartResult) => {
     if (r.state === "error") return setError(r.error);
@@ -64,10 +75,9 @@ function ExamPage() {
   const start = async () => {
     if (!info) return;
     setError("");
-    if (info.fields.some((f) => !values[f]?.trim())) return setError("املأ كل البيانات المطلوبة");
     setStarting(true);
     try {
-      applyResult(await startExamFn({ data: { examId: id, fields: values, access: token } }));
+      applyResult(await startExamFn({ data: { examId: id, access: token } }));
     } catch (e: any) {
       setError(e?.message || "حصل خطأ، حاول تاني");
     } finally {
@@ -75,7 +85,7 @@ function ExamPage() {
     }
   };
 
-  if (phase.k === "loading") return <Centered><Loader2 className="h-6 w-6 animate-spin text-[var(--gold)]" /></Centered>;
+  if (meLoading || !me || phase.k === "loading") return <Centered><Loader2 className="h-6 w-6 animate-spin text-[var(--gold)]" /></Centered>;
   if (phase.k === "missing") {
     return (
       <Centered>
@@ -112,7 +122,6 @@ function ExamPage() {
     return (
       <BlockedScreen
         examId={id}
-        values={values}
         accessToken={token}
         code={phase.code}
         message={phase.message}
@@ -126,7 +135,10 @@ function ExamPage() {
       <Centered>
         <CheckCircle2 className="h-14 w-14 text-[var(--gold)] mx-auto mb-4" />
         <p className="text-lg leading-loose whitespace-pre-wrap">{phase.message}</p>
-        <Link to="/exams" className="btn-gold inline-block ripple mt-8">كل الاختبارات</Link>
+        <div className="flex flex-wrap justify-center gap-3 mt-8">
+          <Link to="/exams" className="btn-gold inline-block ripple">كل الاختبارات</Link>
+          <Link to="/exams/results" className="inline-block rounded-md border border-border px-4 py-2 hover:border-[var(--gold)] transition">نتائج اختباراتي</Link>
+        </div>
       </Centered>
     );
   }
@@ -173,19 +185,11 @@ function ExamPage() {
         </div>
 
         <div className="rounded-xl border border-border bg-card/70 p-6">
-          {info!.fields.map((f, i) => (
-            <div key={f} className="mb-4">
-              <label className="text-sm mb-1 block text-muted-foreground">{f}</label>
-              <input
-                className="input"
-                value={values[f] ?? ""}
-                maxLength={120}
-                autoFocus={i === 0}
-                onChange={(e) => setValues({ ...values, [f]: e.target.value })}
-                onKeyDown={(e) => e.key === "Enter" && start()}
-              />
-            </div>
-          ))}
+          <div className="mb-4 text-sm leading-loose">
+            <div className="text-muted-foreground mb-1">هتدخل الاختبار بحسابك:</div>
+            <div className="font-bold">{me.character_name || me.account_name}</div>
+            {me.account_name && me.character_name && <div className="text-xs text-muted-foreground">{me.account_name}</div>}
+          </div>
           {error && <div className="text-sm text-destructive mb-3">{error}</div>}
           <button onClick={start} disabled={starting} className="btn-gold ripple inline-flex items-center gap-2 disabled:opacity-60">
             {starting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
@@ -208,10 +212,9 @@ function Centered({ children }: { children: React.ReactNode }) {
 // ============================== شاشة الحظر ==============================
 
 function BlockedScreen({
-  examId, values, accessToken, code, message, onResult,
+  examId, accessToken, code, message, onResult,
 }: {
   examId: string;
-  values: Record<string, string>;
   accessToken: string | null;
   code: string;
   message: string;
@@ -225,7 +228,7 @@ function BlockedScreen({
     let stop = false;
     const tick = async () => {
       try {
-        const r = await pollExamFn({ data: { examId, fields: values, access: accessToken } });
+        const r = await pollExamFn({ data: { examId, access: accessToken } });
         if (stop) return;
         if (r.state === "can_start") setReleased(true);
         else if (r.state === "submitted") onResult({ state: "submitted", message: r.message });
@@ -236,12 +239,12 @@ function BlockedScreen({
     };
     const t = setInterval(tick, 5000);
     return () => { stop = true; clearInterval(t); };
-  }, [examId, values, onResult]);
+  }, [examId, accessToken, onResult]);
 
   const start = async () => {
     setStarting(true);
     try {
-      onResult(await startExamFn({ data: { examId, fields: values, access: accessToken } }));
+      onResult(await startExamFn({ data: { examId, access: accessToken } }));
     } finally {
       setStarting(false);
     }

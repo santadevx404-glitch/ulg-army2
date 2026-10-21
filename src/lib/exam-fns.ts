@@ -6,6 +6,8 @@ import * as exams from "./exams.server";
 import * as access from "./access.server";
 import * as audit from "./audit.server";
 import { EXAM_SETTINGS_FIELDS, changedGroups, wildcardKey, type FieldGroup } from "./permissions";
+import { getViewer } from "./viewer.server";
+import { normBypass } from "./bypass";
 
 async function requireActor(): Promise<access.Actor> {
   const actor = await access.actorFromUserId(await auth.verifySessionToken(getCookie(auth.SESSION_COOKIE)));
@@ -28,7 +30,7 @@ function examCan(actor: access.Actor, examId: string): exams.ExamCan {
       edit: access.can(actor, "exams.manage.questions.edit", scope),
       delete: access.can(actor, "exams.manage.questions.delete", scope),
     },
-    review: { view: access.can(actor, "exams.review.view", scope), delete: access.can(actor, "exams.review.delete", scope) },
+    review: { view: access.can(actor, "exams.review.view", scope), grade: access.can(actor, "exams.review.grade", scope), delete: access.can(actor, "exams.review.delete", scope) },
     unblock: access.can(actor, "exams.unblock", scope),
     delete: access.can(actor, "exams.delete", scope),
   };
@@ -44,11 +46,11 @@ function clientWho(): string {
 
 // ==================== الزوار ====================
 
-export const publicExamsFn = createServerFn({ method: "GET" }).handler(async () => exams.listPublicExams());
+export const publicExamsFn = createServerFn({ method: "GET" }).handler(async () => exams.listPublicExams(await getViewer()));
 
 export const publicExamFn = createServerFn({ method: "POST" })
   .validator((d: { id: string; token?: string | null }) => d)
-  .handler(async ({ data }) => exams.getPublicExam(data.id, data.token));
+  .handler(async ({ data }) => exams.getPublicExam(data.id, data.token, await getViewer()));
 
 export const unlockExamFn = createServerFn({ method: "POST" })
   .validator((d: { examId: string; password: string }) => d)
@@ -58,13 +60,21 @@ export const unlockByPasswordFn = createServerFn({ method: "POST" })
   .validator((d: { password: string }) => d)
   .handler(async ({ data }) => exams.unlockByPassword(data.password, clientWho()));
 
+// الاختبارات للمسجّلين بس — بيانات الطالب بتتاخد من حسابه على السيرفر.
+const examUser = (a: access.Actor): exams.ExamUser => ({ id: a.user.id, account_name: a.user.account_name, character_name: a.user.character_name });
+
 export const startExamFn = createServerFn({ method: "POST" })
-  .validator((d: { examId: string; fields: Record<string, string>; access?: string | null }) => d)
-  .handler(async ({ data }) => exams.startExam(data.examId, data.fields, data.access));
+  .validator((d: { examId: string; access?: string | null }) => d)
+  .handler(async ({ data }) => exams.startExam(data.examId, examUser(await requireActor()), data.access));
 
 export const pollExamFn = createServerFn({ method: "POST" })
-  .validator((d: { examId: string; fields: Record<string, string>; access?: string | null }) => d)
-  .handler(async ({ data }) => exams.pollExamState(data.examId, data.fields, data.access));
+  .validator((d: { examId: string; access?: string | null }) => d)
+  .handler(async ({ data }) => exams.pollExamState(data.examId, examUser(await requireActor()), data.access));
+
+export const myExamResultsFn = createServerFn({ method: "GET" }).handler(async () => {
+  const actor = await requireActor();
+  return exams.myResults(actor.user.id);
+});
 
 export const saveAnswersFn = createServerFn({ method: "POST" })
   .validator((d: { attemptId: string; token: string; answers: Record<string, string>; final?: boolean }) => d)
@@ -85,6 +95,8 @@ const QUESTION_FIELDS: FieldGroup[] = [
   { id: "image_mode", label: "صورة في الإجابة", fields: ["image_mode"] },
   { id: "max_images", label: "أقصى عدد صور", fields: ["max_images"] },
   { id: "model_answer", label: "الإجابة النموذجية", fields: ["model_answer"] },
+  { id: "points", label: "درجة السؤال", fields: ["points"] },
+  { id: "correct_answer", label: "الإجابة الصح (للتصحيح التلقائي)", fields: ["correct_answer"] },
 ];
 
 const short = (t: string, n = 60) => (t.length > n ? `${t.slice(0, n)}…` : t);
@@ -107,6 +119,7 @@ export const adminSaveExamFn = createServerFn({ method: "POST" })
     const actor = await requireActor();
     const data = { ...raw };
     if (data.password === MASK) delete data.password; // كلمة سر مقنّعة = مفيش تغيير
+    if ("bypass" in data) data.bypass = normBypass(data.bypass);
     if (data.id) {
       const existing = await exams.adminGetExam(data.id);
       if (!existing) throw new Error("الاختبار غير موجود");
@@ -222,6 +235,18 @@ export const adminAttemptFn = createServerFn({ method: "GET" })
       await audit.logAdmin(actor, { category: "attempts", action: "attempt.view", summary: `اطّلع على إجابات «${a.identity ?? ""}»`, target: exam?.title ?? null });
     }
     return detail;
+  });
+
+export const adminGradeAttemptFn = createServerFn({ method: "POST" })
+  .validator((d: { id: string; scores: Record<string, number | string | null> }) => d)
+  .handler(async ({ data }) => {
+    const actor = await requireActor();
+    const examIds = await exams.examIdsForAttempts([data.id]);
+    assertExams(actor, "exams.review.grade", examIds);
+    const res = await exams.adminGradeAttempt(data.id, data.scores ?? {}, actor.user.account_name || actor.user.email);
+    const note = await describeAttempts([data.id]);
+    await audit.logAdmin(actor, { category: "attempts", action: "attempt.grade", summary: `صحّح تسليم (${res.total}/${res.max})`, note });
+    return res;
   });
 
 async function describeAttempts(ids: string[]): Promise<string> {

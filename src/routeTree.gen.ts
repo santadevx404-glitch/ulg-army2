@@ -24,6 +24,7 @@ import { Route as ChatIndexRouteImport } from './routes/chat.index'
 import { Route as ChatIdRouteImport } from './routes/chat.$id'
 import { Route as ExamsIndexRouteImport } from './routes/exams.index'
 import { Route as ExamsIdRouteImport } from './routes/exams.$id'
+import { Route as ExamsResultsRouteImport } from './routes/exams.results'
 import { Route as SSlugRouteImport } from './routes/s.$slug'
 import { Route as ApiAnnouncementImageNameRouteImport } from './routes/api.announcement-image.$name'
 import { Route as ApiAvatarNameRouteImport } from './routes/api.avatar.$name'
@@ -106,6 +107,11 @@ const ExamsIdRoute = ExamsIdRouteImport.update({
   path: '/exams/$id',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ExamsResultsRoute = ExamsResultsRouteImport.update({
+  id: '/exams/results',
+  path: '/exams/results',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SSlugRoute = SSlugRouteImport.update({
   id: '/s/$slug',
   path: '/s/$slug',
@@ -152,6 +158,7 @@ export interface FileRoutesByFullPath {
   '/api/storage-check': typeof ApiStorageCheckRoute
   '/chat/$id': typeof ChatIdRoute
   '/exams/$id': typeof ExamsIdRoute
+  '/exams/results': typeof ExamsResultsRoute
   '/s/$slug': typeof SSlugRouteWithChildren
   '/chat/': typeof ChatIndexRoute
   '/exams/': typeof ExamsIndexRoute
@@ -175,6 +182,7 @@ export interface FileRoutesByTo {
   '/api/storage-check': typeof ApiStorageCheckRoute
   '/chat/$id': typeof ChatIdRoute
   '/exams/$id': typeof ExamsIdRoute
+  '/exams/results': typeof ExamsResultsRoute
   '/s/$slug': typeof SSlugRouteWithChildren
   '/chat': typeof ChatIndexRoute
   '/exams': typeof ExamsIndexRoute
@@ -199,6 +207,7 @@ export interface FileRoutesById {
   '/api/storage-check': typeof ApiStorageCheckRoute
   '/chat/$id': typeof ChatIdRoute
   '/exams/$id': typeof ExamsIdRoute
+  '/exams/results': typeof ExamsResultsRoute
   '/s/$slug': typeof SSlugRouteWithChildren
   '/chat/': typeof ChatIndexRoute
   '/exams/': typeof ExamsIndexRoute
@@ -224,6 +233,7 @@ export interface FileRouteTypes {
     | '/api/storage-check'
     | '/chat/$id'
     | '/exams/$id'
+    | '/exams/results'
     | '/s/$slug'
     | '/chat/'
     | '/exams/'
@@ -247,6 +257,7 @@ export interface FileRouteTypes {
     | '/api/storage-check'
     | '/chat/$id'
     | '/exams/$id'
+    | '/exams/results'
     | '/s/$slug'
     | '/chat'
     | '/exams'
@@ -270,6 +281,7 @@ export interface FileRouteTypes {
     | '/api/storage-check'
     | '/chat/$id'
     | '/exams/$id'
+    | '/exams/results'
     | '/s/$slug'
     | '/chat/'
     | '/exams/'
@@ -294,6 +306,7 @@ export interface RootRouteChildren {
   ApiStorageCheckRoute: typeof ApiStorageCheckRoute
   ChatIdRoute: typeof ChatIdRoute
   ExamsIdRoute: typeof ExamsIdRoute
+  ExamsResultsRoute: typeof ExamsResultsRoute
   SSlugRoute: typeof SSlugRouteWithChildren
   ChatIndexRoute: typeof ChatIndexRoute
   ExamsIndexRoute: typeof ExamsIndexRoute
@@ -404,6 +417,13 @@ declare module '@tanstack/react-router' {
       path: '/exams/$id'
       fullPath: '/exams/$id'
       preLoaderRoute: typeof ExamsIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/exams/results': {
+      id: '/exams/results'
+      path: '/exams/results'
+      fullPath: '/exams/results'
+      preLoaderRoute: typeof ExamsResultsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/s/$slug': {
@@ -522,6 +542,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiStorageCheckRoute: ApiStorageCheckRoute,
   ChatIdRoute: ChatIdRoute,
   ExamsIdRoute: ExamsIdRoute,
+  ExamsResultsRoute: ExamsResultsRoute,
   SSlugRoute: SSlugRouteWithChildren,
   ChatIndexRoute: ChatIndexRoute,
   ExamsIndexRoute: ExamsIndexRoute,

@@ -1,9 +1,10 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
-import { ClipboardList, Clock, CalendarX, ArrowLeft, Lock, KeyRound } from "lucide-react";
+import { ClipboardList, Clock, CalendarX, ArrowLeft, Lock, KeyRound, Award } from "lucide-react";
 import { publicExamsFn, unlockByPasswordFn } from "@/lib/exam-fns";
+import { useMe } from "@/lib/use-me";
 
 export const Route = createFileRoute("/exams/")({
   head: () => ({
@@ -53,17 +54,28 @@ function SecretCodeBox() {
 }
 
 function ExamsIndex() {
+  const navigate = useNavigate();
+  const { me, loading } = useMe();
+  // الاختبارات للمسجّلين بس
+  useEffect(() => {
+    if (!loading && !me) navigate({ to: "/auth" });
+  }, [loading, me, navigate]);
   const { data: exams, isLoading } = useQuery({
-    queryKey: ["public-exams"],
+    queryKey: ["public-exams", me?.id ?? null],
     queryFn: () => publicExamsFn(),
+    enabled: !!me,
   });
+  if (loading || !me) return <div className="p-16 text-center text-muted-foreground">جارٍ التحميل...</div>;
 
   return (
     <div className="p-6 md:p-10 max-w-5xl mx-auto">
       <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6 }}>
         <div className="mb-10 pb-6 border-b border-border">
           <div className="text-sm text-muted-foreground mb-2">حرس الحدود</div>
-          <h1 className="text-4xl md:text-5xl font-black gold-text">الاختبارات</h1>
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <h1 className="text-4xl md:text-5xl font-black gold-text">الاختبارات</h1>
+            <Link to="/exams/results" className="btn-gold ripple inline-flex items-center gap-2"><Award className="h-4 w-4" />نتائج اختباراتي</Link>
+          </div>
         </div>
       </motion.div>
 

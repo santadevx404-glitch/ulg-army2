@@ -28,7 +28,7 @@ export const SECTION_FIELDS: FieldGroup[] = [
   { id: "icon", label: "الأيقونة", fields: ["icon"] },
   { id: "order", label: "الترتيب", fields: ["sort_order"] },
   { id: "visibility", label: "الظهور للزوار", fields: ["visible"] },
-  { id: "password", label: "كلمة سر القسم", fields: ["password"] },
+  { id: "password", label: "كلمة سر القسم والمستثنين منها", fields: ["password", "bypass"] },
 ];
 
 export const ITEM_FIELDS: FieldGroup[] = [
@@ -40,7 +40,7 @@ export const ITEM_FIELDS: FieldGroup[] = [
   { id: "published", label: "النشر والإخفاء", fields: ["published"] },
   { id: "order", label: "الترتيب", fields: ["sort_order"] },
   { id: "topics_mode", label: "تفعيل نظام المواضيع", fields: ["use_topics"] },
-  { id: "password", label: "كلمة سر العنصر", fields: ["password"] },
+  { id: "password", label: "كلمة سر العنصر والمستثنين منها", fields: ["password", "bypass"] },
   { id: "section", label: "نقل لقسم تاني", fields: ["section_id"] },
 ];
 
@@ -54,12 +54,12 @@ export const TOPIC_FIELDS: FieldGroup[] = [
 export const EXAM_SETTINGS_FIELDS: FieldGroup[] = [
   { id: "title", label: "عنوان الاختبار", fields: ["title"] },
   { id: "description", label: "الوصف ورسالة ما قبل البدء", fields: ["description", "intro_message"] },
-  { id: "fields", label: "حقول بيانات الدخول", fields: ["fields"] },
+  { id: "grading", label: "طريقة التصحيح (يدوي / تلقائي)", fields: ["grading"] },
   { id: "limits", label: "الأسئلة الاختيارية والمدة وتاريخ الانتهاء", fields: ["optional_count", "attempt_minutes", "ends_at"] },
   { id: "options", label: "الترتيب العشوائي وحظر تبديل التاب", fields: ["shuffle", "block_on_tab_switch"] },
   { id: "publish", label: "النشر والإخفاء", fields: ["published"] },
   { id: "messages", label: "رسائل التسليم والوقت والحظر والانتهاء", fields: ["submit_message", "timeout_message", "block_message", "closed_message"] },
-  { id: "access", label: "نوع الاختبار وكلمة السر", fields: ["access", "password"] },
+  { id: "access", label: "نوع الاختبار وكلمة السر والمستثنين منها", fields: ["access", "password", "bypass"] },
 ];
 
 /** الحقول (أو المجموعات) اللي اتغيّرت بين الموجود والجديد. بتتقارن بالقيمة مش بالمرجع. */
@@ -146,6 +146,7 @@ export const EXAMS_REVIEW: PNode = {
   label: "التسليمات",
   children: [
     { key: "exams.review.view", label: "عرض التسليمات وإجابات الأشخاص" },
+    { key: "exams.review.grade", label: "تصحيح الاختبارات وتحديد الدرجات" },
     { key: "exams.review.delete", label: "حذف التسليمات" },
   ],
 };

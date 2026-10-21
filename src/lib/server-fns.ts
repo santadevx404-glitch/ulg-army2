@@ -11,6 +11,8 @@ import { ITEM_FIELDS, SECTION_FIELDS, TOPIC_FIELDS, changedGroups, visibleTabs, 
 import fs from "node:fs";
 import path from "node:path";
 import { USE_LOCAL_STORAGE } from "./kv-store.server";
+import { getViewer } from "./viewer.server";
+import { normBypass } from "./bypass";
 
 async function currentUserId(): Promise<string | null> {
   const token = getCookie(auth.SESSION_COOKIE);
@@ -106,10 +108,31 @@ export const currentUserFn = createServerFn({ method: "GET" }).handler(async () 
   };
 });
 
+// ==================== استثناء كلمة السر (قايمة الرتب والأشخاص للاختيار) ====================
+
+export type BypassOptions = {
+  ranks: { id: string; name: string }[];
+  users: { id: string; name: string; code: string }[];
+};
+
+/** الرتب والأشخاص اللي ينفع تستثنيهم من كلمة السر — لمن يقدر يعدّل كلمة سر قسم/عنصر/اختبار. */
+export const bypassOptionsFn = createServerFn({ method: "GET" }).handler(async (): Promise<BypassOptions> => {
+  const actor = await requireActor();
+  const ok = actor.owner || ["sections.edit.password", "items.edit.password", "exams.manage.settings.access"].some((k) => access.canAny(actor, k));
+  if (!ok) throw new Error("ليس لديك صلاحية لهذا الإجراء");
+  const [ranks, users] = await Promise.all([access.listRanks(), auth.listUsers()]);
+  return {
+    ranks: ranks.map((r) => ({ id: r.id, name: r.name })),
+    users: users
+      .filter((u) => u.status === "active" && !auth.isOwner(u))
+      .map((u) => ({ id: u.id, name: u.character_name || u.account_name || u.email, code: u.military_code ?? "" })),
+  };
+});
+
 // ==================== Sections ====================
 
 export const sectionsFn = createServerFn({ method: "GET" }).handler(async () => {
-  const sections = await store.getPublicSections();
+  const sections = await store.getPublicSections(await getViewer());
   return sections.filter((s) => s.visible);
 });
 
@@ -133,13 +156,13 @@ export const sectionsAdminFn = createServerFn({ method: "GET" }).handler(async (
 export const sectionBySlugFn = createServerFn({ method: "GET" })
   .validator((slug: string) => slug)
   .handler(async ({ data: slug }) => {
-    return store.getSectionWithItems(slug);
+    return store.getSectionWithItems(slug, await getViewer());
   });
 
 export const unlockSectionFn = createServerFn({ method: "POST" })
   .validator((d: { slug: string; password: string }) => d)
   .handler(async ({ data }) => {
-    const items = await store.unlockSection(data.slug, data.password);
+    const items = await store.unlockSection(data.slug, data.password, await getViewer());
     if (items === null) return { error: "كلمة السر غلط" };
     return { items };
   });
@@ -149,6 +172,7 @@ export const saveSectionFn = createServerFn({ method: "POST" })
   .handler(async ({ data: raw }) => {
     const actor = await requireActor();
     const data = unmask(raw);
+    if ("bypass" in data) data.bypass = normBypass(data.bypass);
     if (data.id) {
       const existing = (await store.getSections()).find((s) => s.id === data.id);
       if (!existing) throw new Error("القسم غير موجود");
@@ -202,7 +226,7 @@ export const itemsAdminFn = createServerFn({ method: "GET" }).handler(async () =
 export const itemByIdFn = createServerFn({ method: "POST" })
   .validator((d: { id: string; password?: string }) => d)
   .handler(async ({ data }) => {
-    return store.getItemWithSection(data.id, data.password);
+    return store.getItemWithSection(data.id, data.password, await getViewer());
   });
 
 export const saveItemFn = createServerFn({ method: "POST" })
@@ -210,6 +234,7 @@ export const saveItemFn = createServerFn({ method: "POST" })
   .handler(async ({ data: raw }) => {
     const actor = await requireActor();
     const data = unmask(raw);
+    if ("bypass" in data) data.bypass = normBypass(data.bypass);
     if (data.id) {
       const existing = (await store.getItems()).find((i) => i.id === data.id);
       if (!existing) throw new Error("العنصر غير موجود");
@@ -276,7 +301,7 @@ async function itemForTopics(actor: access.Actor, itemId: string, perms: string[
 export const topicsByItemFn = createServerFn({ method: "POST" })
   .validator((d: { itemId: string; password?: string }) => d)
   .handler(async ({ data }) => {
-    const detail = await store.getItemWithSection(data.itemId, data.password);
+    const detail = await store.getItemWithSection(data.itemId, data.password, await getViewer());
     if (!detail || detail.locked) return [];
     return store.getTopicsByItem(data.itemId);
   });

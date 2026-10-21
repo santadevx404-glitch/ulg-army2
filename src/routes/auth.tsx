@@ -36,6 +36,7 @@ function AuthPage() {
         toast.success("تم تسجيل الدخول");
         const me = await currentUserFn();
         qc.setQueryData(["me"], me);
+        qc.invalidateQueries({ predicate: (q) => q.queryKey[0] !== "me" }); // الأقسام/العناصر بتتحدّث حسب المستثنين من كلمة السر
         navigate({ to: me && me.tabs.length > 0 ? "/admin" : "/profile" });
       } else {
         const res = await signupFn({ data: { email, password } });

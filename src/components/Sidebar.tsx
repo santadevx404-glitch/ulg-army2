@@ -38,7 +38,7 @@ export function Sidebar() {
       label: s.name,
       icon: (s.icon && iconMap[s.icon]) || Shield,
     })),
-    { to: "/exams" as const, label: "الاختبارات", icon: ClipboardList },
+    ...(authed ? [{ to: "/exams" as const, label: "الاختبارات", icon: ClipboardList }] : []),
     ...(authed ? [{ to: "/chat" as const, label: "الدردشات", icon: MessageSquare }] : []),
   ];
 
@@ -163,6 +163,7 @@ export function Sidebar() {
                 onClick={async () => {
                   await logoutFn();
                   qc.setQueryData(["me"], null);
+                  qc.invalidateQueries({ predicate: (q) => q.queryKey[0] !== "me" });
                 }}
                 className="w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm hover:bg-white/5 text-foreground/70"
               >

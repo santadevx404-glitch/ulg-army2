@@ -19,6 +19,7 @@ import { ExamsAdmin, SubmissionsAdmin, BlockedAdmin, useBlockedCount } from "@/c
 import { RequestsAdmin, MembersAdmin, RanksAdmin, LogAdmin, usePendingRequestsCount } from "@/components/AccountsAdmin";
 import { ChatsAdmin } from "@/components/ChatsAdmin";
 import { StorageStatus } from "@/components/StorageStatus";
+import { BypassPicker } from "@/components/BypassPicker";
 import { AnnouncementsAdmin } from "@/components/AnnouncementsAdmin";
 import { useMe } from "@/lib/use-me";
 import { TAB_LABELS, type TabId } from "@/lib/permissions";
@@ -113,6 +114,7 @@ function SectionsAdmin() {
       sort_order: editing.sort_order ?? 0,
       visible: editing.visible ?? true,
       password: editing.password?.trim() ? editing.password.trim() : null,
+      bypass: editing.password?.trim() ? (editing.bypass ?? null) : null,
     };
     try {
       await saveSectionFn({ data: payload });
@@ -167,6 +169,11 @@ function SectionsAdmin() {
           <Field label="كلمة سر القسم (اختياري — سيبها فاضية لإلغاء القفل)" locked={lk("password")}>
             <input className="input" dir="ltr" type="text" value={editing.password || ""} onChange={(e) => setEditing({ ...editing, password: e.target.value })} placeholder="مثال: 1234" />
           </Field>
+          {editing.password?.trim() && (
+            <Field label="مين يدخل القسم من غير كلمة سر؟ (اختياري)" locked={lk("password")}>
+              <BypassPicker value={editing.bypass} onChange={(b) => setEditing({ ...editing, bypass: b })} />
+            </Field>
+          )}
           <button onClick={save} className="btn-gold ripple mt-6 inline-flex items-center gap-2"><Save className="h-4 w-4" />حفظ</button>
         </Modal>
       )}
@@ -221,6 +228,7 @@ function ItemsAdmin() {
       sort_order: editing.sort_order ?? 0,
       use_topics: editing.use_topics ?? false,
       password: editing.password?.trim() ? editing.password.trim() : null,
+      bypass: editing.password?.trim() ? (editing.bypass ?? null) : null,
     };
     try {
       await saveItemFn({ data: payload });
@@ -352,6 +360,11 @@ function ItemsAdmin() {
           <Field label="كلمة سر العنصر (اختياري — سيبها فاضية لإلغاء القفل)" locked={lk("password")}>
             <input className="input" dir="ltr" type="text" value={editing.password || ""} onChange={(e) => setEditing({ ...editing, password: e.target.value })} placeholder="مثال: 1234" />
           </Field>
+          {editing.password?.trim() && (
+            <Field label="مين يدخل العنصر من غير كلمة سر؟ (اختياري)" locked={lk("password")}>
+              <BypassPicker value={editing.bypass} onChange={(b) => setEditing({ ...editing, bypass: b })} />
+            </Field>
+          )}
 
           {editing.id && editing.use_topics && (
             <TopicsEditor itemId={editing.id} sectionId={editing.section_id} />

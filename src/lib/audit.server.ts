@@ -88,7 +88,13 @@ export function buildChanges(groups: FieldGroup[], existing: Record<string, unkn
       const after = incoming[f] ?? null;
       if (JSON.stringify(before) === JSON.stringify(after)) continue;
       const label = g.fields.length > 1 ? `${g.label} — ${f}` : g.label;
-      if (SECRET_FIELDS.has(f)) out.push({ label, before: before ? "••••" : null, after: after ? "••••" : null });
+      if (f === "bypass") {
+        const sum = (v: unknown) => {
+          const b = v as { user_ids?: string[]; rank_ids?: string[] } | null;
+          return b && ((b.user_ids?.length ?? 0) + (b.rank_ids?.length ?? 0)) ? `${b.user_ids?.length ?? 0} شخص، ${b.rank_ids?.length ?? 0} رتبة` : null;
+        };
+        out.push({ label: g.label, before: sum(before), after: sum(after) });
+      } else if (SECRET_FIELDS.has(f)) out.push({ label, before: before ? "••••" : null, after: after ? "••••" : null });
       else out.push({ label, before: fmtValue(before), after: fmtValue(after) });
     }
   }

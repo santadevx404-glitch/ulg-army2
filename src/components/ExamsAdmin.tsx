@@ -3,13 +3,14 @@ import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
-  Plus, Trash2, Edit3, Save, ListChecks, Link2, Eye, EyeOff, Search, Unlock, RotateCcw, FileText, ArrowRight, Layers,
+  Plus, Trash2, Edit3, Save, ListChecks, Link2, Eye, EyeOff, Search, Unlock, RotateCcw, FileText, ArrowRight, Layers, ClipboardCheck, CheckCircle2, XCircle,
 } from "lucide-react";
 import {
   adminExamsFn, adminSaveExamFn, adminDeleteExamFn,
   adminQuestionsFn, adminSaveQuestionFn, adminDeleteQuestionsFn, adminBulkQuestionsFn,
-  adminAttemptsFn, adminAttemptFn, adminUnblockFn, adminRetakeFn, adminDeleteAttemptsFn,
+  adminAttemptsFn, adminAttemptFn, adminGradeAttemptFn, adminUnblockFn, adminRetakeFn, adminDeleteAttemptsFn,
 } from "@/lib/exam-fns";
+import { BypassPicker } from "@/components/BypassPicker";
 import type { AdminExam, AdminAttemptRow, Question, QType, QKind, ImageMode } from "@/lib/exams.server";
 import { Field, Modal } from "@/components/admin-ui";
 import { useMe } from "@/lib/use-me";
@@ -48,14 +49,12 @@ export function ExamsAdmin() {
   const lk = (g: string) => !!editing?.id && !can(`exams.manage.settings.${g}`, { exam: editing.id });
   const { data: exams = [], refetch } = useQuery(examsQuery);
   const [editing, setEditing] = useState<Partial<AdminExam> | null>(null);
-  const [fieldsText, setFieldsText] = useState("");
   const [questionsFor, setQuestionsFor] = useState<AdminExam | null>(null);
 
   const refresh = () => { refetch(); qc.invalidateQueries({ queryKey: ["public-exams"] }); };
 
   const openEdit = (e: Partial<AdminExam>) => {
     setEditing(e);
-    setFieldsText((e.fields ?? ["اسم الحساب", "الاسم"]).join("\n"));
   };
 
   const save = async () => {
@@ -67,7 +66,7 @@ export function ExamsAdmin() {
           title: editing.title,
           description: editing.description ?? "",
           published: editing.published ?? false,
-          fields: fieldsText.split("\n").map((s) => s.trim()).filter(Boolean),
+          grading: editing.grading ?? "manual",
           optional_count: Number(editing.optional_count) || 0,
           shuffle: editing.shuffle ?? true,
           attempt_minutes: editing.attempt_minutes ? Number(editing.attempt_minutes) : null,
@@ -80,6 +79,7 @@ export function ExamsAdmin() {
           closed_message: editing.closed_message ?? "",
           access: editing.access ?? "open",
           password: editing.password ?? null,
+          bypass: (editing.access ?? "open") !== "open" ? (editing.bypass ?? null) : null,
         },
       });
     } catch (e: any) { return toast.error(e.message || "حدث خطأ"); }
@@ -96,7 +96,7 @@ export function ExamsAdmin() {
   };
 
   const togglePublish = async (e: AdminExam) => {
-    try { await adminSaveExamFn({ data: { id: e.id, title: e.title, fields: e.fields, published: !e.published } }); }
+    try { await adminSaveExamFn({ data: { id: e.id, title: e.title, published: !e.published } }); }
     catch (err: any) { return toast.error(err.message || "حدث خطأ"); }
     refresh();
   };
@@ -171,8 +171,11 @@ export function ExamsAdmin() {
             </Field>
           </div>
 
-          <Field label="بيانات الدخول (سطر لكل حقل — أول سطر هو اللي بيعرّف الشخص)" locked={lk("fields")}>
-            <textarea className="input min-h-20" value={fieldsText} onChange={(e) => setFieldsText(e.target.value)} />
+          <Field label="طريقة التصحيح" locked={lk("grading")} hint="الدرجة النهائية = مجموع درجات الأسئلة (كل سؤال له درجته في بنك الأسئلة). الاختبار للمسجّلين بس وبيانات الطالب بتتاخد من حسابه.">
+            <select className="input" value={editing.grading ?? "manual"} onChange={(e) => setEditing({ ...editing, grading: e.target.value as "manual" | "auto" })}>
+              <option value="manual">يدوي — أنا بصحّح كل الأسئلة وأحدد درجتها</option>
+              <option value="auto">تلقائي — الاختيارات بتتصحح لوحدها حسب الإجابة الصح اللي أحددها، والنصي بصححه أنا</option>
+            </select>
           </Field>
 
           <div className="flex flex-wrap gap-6 mb-4">
@@ -192,6 +195,11 @@ export function ExamsAdmin() {
             {(editing.access ?? "open") !== "open" && (
               <Field label="كلمة سر الاختبار (4 أحرف على الأقل، ومينفعش تتكرر في اختبار تاني)" locked={lk("access")} hint={editing.access === "hidden" ? "المشفّر بيتفتح بكلمة السر لوحدها من صفحة الاختبارات، فشاركها مع اللي عايزهم يدخلوه بس." : undefined}>
                 <input className="input" dir="ltr" value={editing.password ?? ""} onChange={(e) => setEditing({ ...editing, password: e.target.value })} />
+              </Field>
+            )}
+            {(editing.access ?? "open") !== "open" && (
+              <Field label="مين يدخل الاختبار من غير كلمة سر؟ (اختياري)" locked={lk("access")} hint={editing.access === "hidden" ? "المشفّر بيظهر في قايمة الاختبارات للمستثنين دول بس." : undefined}>
+                <BypassPicker value={editing.bypass} onChange={(b) => setEditing({ ...editing, bypass: b })} />
               </Field>
             )}
           </div>
@@ -257,6 +265,8 @@ function QuestionsAdmin({ exam, onBack }: { exam: AdminExam; onBack: () => void 
           image_mode: editing.image_mode ?? "none",
           max_images: editing.max_images ?? 3,
           model_answer: editing.model_answer ?? null,
+          points: editing.points ?? 1,
+          correct_answer: (editing.type ?? "choice") === "choice" ? (editing.correct_answer ?? null) : null,
         },
       });
     } catch (e: any) { return toast.error(e.message || "حدث خطأ"); }
@@ -332,6 +342,8 @@ function QuestionsAdmin({ exam, onBack }: { exam: AdminExam; onBack: () => void 
                 <span className={q.kind === "core" ? "text-[var(--gold)]" : ""}>{q.kind === "core" ? "أساسي" : "اختياري"}</span>
                 <span>{typeLabel[q.type]}</span>
                 {q.type === "choice" && <span>{q.options.length} اختيارات</span>}
+                <span>{q.points} درجة</span>
+                {q.type === "choice" && (q.correct_answer ? <span className="text-emerald-500">له إجابة صح</span> : exam.grading === "auto" ? <span className="text-destructive">من غير إجابة صح</span> : null)}
                 {q.model_answer && <span>له إجابة نموذجية</span>}
                 {q.image_mode && q.image_mode !== "none" && <span className="text-[var(--gold)]">صورة {q.image_mode === "required" ? "إجبارية" : "اختيارية"} (حتى {q.max_images})</span>}
               </div>
@@ -367,6 +379,19 @@ function QuestionsAdmin({ exam, onBack }: { exam: AdminExam; onBack: () => void 
               <textarea className="input min-h-28" value={optionsText} onChange={(e) => setOptionsText(e.target.value)} />
             </Field>
           )}
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="درجة السؤال" hint="تتجمع كلها في الدرجة النهائية">
+              <input type="number" min={0} step="any" className="input" dir="ltr" value={editing.points ?? 1} onChange={(e) => setEditing({ ...editing, points: e.target.value === "" ? undefined : Number(e.target.value) })} />
+            </Field>
+            {(editing.type ?? "choice") === "choice" && (
+              <Field label="الإجابة الصح (للتصحيح التلقائي)">
+                <select className="input" value={editing.correct_answer ?? ""} onChange={(e) => setEditing({ ...editing, correct_answer: e.target.value || null })}>
+                  <option value="">— مفيش —</option>
+                  {optionsText.split("\n").map((o) => o.trim()).filter(Boolean).map((o) => <option key={o} value={o}>{o}</option>)}
+                </select>
+              </Field>
+            )}
+          </div>
           <div className="grid grid-cols-2 gap-4">
             <Field label="صورة في الإجابة">
               <select className="input" value={editing.image_mode ?? "none"} onChange={(e) => setEditing({ ...editing, image_mode: e.target.value as ImageMode })}>
@@ -405,7 +430,7 @@ function QuestionsAdmin({ exam, onBack }: { exam: AdminExam; onBack: () => void 
             </Field>
           </div>
           <div className="text-xs text-muted-foreground mb-2 leading-loose">
-            افصل بين كل سؤال والتاني بسطر فاضي. أي سطر بيبدأ بـ ‎-‎ بيتحسب اختيار (لازم اختيارين على الأقل عشان السؤال يبقى اختيارات).
+            افصل بين كل سؤال والتاني بسطر فاضي. أي سطر بيبدأ بـ ‎-‎ بيتحسب اختيار (لازم اختيارين على الأقل عشان السؤال يبقى اختيارات). ابدأ سطر الإجابة الصح بـ ‎+‎ بدل ‎-‎. كل سؤال بياخد درجة 1 وتقدر تعدّلها بعدين.
           </div>
           <textarea
             className="input min-h-72 font-mono text-sm"
@@ -474,7 +499,11 @@ export function SubmissionsAdmin() {
         {rows.length === 0 && <div className="text-muted-foreground text-sm">مفيش محاولات.</div>}
         {rows.map((a) => (
           <AttemptRow key={a.id} a={a}>
-            <button onClick={() => setViewId(a.id)} className="px-3 py-1.5 rounded-md border border-border hover:border-[var(--gold)] text-sm inline-flex items-center gap-2"><FileText className="h-4 w-4" />الإجابات</button>
+            {(a.status === "submitted" || a.status === "retired") && can("exams.review.grade", { exam: a.exam_id }) ? (
+              <button onClick={() => setViewId(a.id)} className="px-3 py-1.5 rounded-md border border-[var(--gold)] text-[var(--gold)] text-sm inline-flex items-center gap-2"><ClipboardCheck className="h-4 w-4" />تصحيح</button>
+            ) : (
+              <button onClick={() => setViewId(a.id)} className="px-3 py-1.5 rounded-md border border-border hover:border-[var(--gold)] text-sm inline-flex items-center gap-2"><FileText className="h-4 w-4" />الإجابات</button>
+            )}
             {a.status === "submitted" && can("exams.unblock", { exam: a.exam_id }) && (
               <button onClick={() => retake(a.id)} title="السماح بمحاولة جديدة" className="p-2 hover:text-[var(--gold)]"><RotateCcw className="h-4 w-4" /></button>
             )}
@@ -483,7 +512,7 @@ export function SubmissionsAdmin() {
         ))}
       </div>
 
-      {viewId && <AttemptModal id={viewId} onClose={() => setViewId(null)} />}
+      {viewId && <AttemptModal id={viewId} canGrade={can("exams.review.grade", { exam: attempts.find((a) => a.id === viewId)?.exam_id ?? "" })} onClose={() => { setViewId(null); refresh(); }} />}
     </div>
   );
 }
@@ -494,7 +523,7 @@ function AttemptRow({ a, children }: { a: AdminAttemptRow; children?: React.Reac
       <div className="flex-1 min-w-56">
         <div className="font-bold">{Object.values(a.fields).join(" — ")}</div>
         <div className="text-xs text-muted-foreground mt-1">
-          {a.exam_title} • محاولة {a.attempt_no} • <span className={a.status === "blocked" ? "text-destructive" : a.status === "submitted" ? "text-[var(--gold)]" : ""}>{statusLabel[a.status]}</span>
+          {a.exam_title} • محاولة {a.attempt_no} • {(a.status === "submitted" || a.status === "retired") && (a.graded ? <span className="text-emerald-500 font-bold">{a.score}/{a.max} </span> : <span className="text-amber-500">لسه مصححش • </span>)}<span className={a.status === "blocked" ? "text-destructive" : a.status === "submitted" ? "text-[var(--gold)]" : ""}>{statusLabel[a.status]}</span>
           {a.block_code && <> • <span dir="ltr" className="font-mono">{a.block_code}</span></>}
         </div>
         <div className="text-xs text-muted-foreground">
@@ -508,24 +537,80 @@ function AttemptRow({ a, children }: { a: AdminAttemptRow; children?: React.Reac
   );
 }
 
-function AttemptModal({ id, onClose }: { id: string; onClose: () => void }) {
+function AttemptModal({ id, canGrade, onClose }: { id: string; canGrade: boolean; onClose: () => void }) {
+  const qc = useQueryClient();
   const { data, isLoading } = useQuery({ queryKey: ["admin-attempt", id], queryFn: () => adminAttemptFn({ data: id }) });
+  const [scores, setScores] = useState<Record<string, string>>({});
+  const [init, setInit] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  // نبدأ بالدرجات الحالية (اليدوية أو التلقائية)
+  if (data && !init) {
+    const o: Record<string, string> = {};
+    for (const it of data.items) if (it.score !== null) o[it.id] = String(it.score);
+    setScores(o);
+    setInit(true);
+  }
+
+  const gradable = !!data && canGrade && (data.attempt.status === "submitted" || data.attempt.status === "retired");
+  const total = data ? Math.round(data.items.reduce((s, it) => s + (Number(scores[it.id]) || 0), 0) * 100) / 100 : 0;
+  const max = data ? Math.round(data.items.reduce((s, it) => s + it.points, 0) * 100) / 100 : 0;
+
+  const save = async () => {
+    if (!data) return;
+    for (const it of data.items) {
+      const v = scores[it.id];
+      if (v !== undefined && v !== "" && (Number(v) < 0 || Number(v) > it.points)) return toast.error(`درجة السؤال لازم بين 0 و ${it.points}`);
+    }
+    setSaving(true);
+    try {
+      const r = await adminGradeAttemptFn({ data: { id, scores } });
+      toast.success(`اتحفظ التصحيح: ${r.total}/${r.max}`);
+      qc.invalidateQueries({ queryKey: ["admin-attempt", id] });
+      qc.invalidateQueries({ queryKey: ["admin-attempts"] });
+      onClose();
+    } catch (e: any) { toast.error(e.message || "حدث خطأ"); } finally { setSaving(false); }
+  };
+
   return (
-    <Modal wide onClose={onClose} title="إجابات المحاولة">
+    <Modal wide onClose={onClose} title={gradable ? "تصحيح المحاولة" : "إجابات المحاولة"}>
       {isLoading && <div className="text-muted-foreground">جارٍ التحميل...</div>}
       {data && (
         <div>
-          <div className="text-sm text-muted-foreground mb-4">
+          <div className="text-sm text-muted-foreground mb-2">
             {data.exam_title} • {Object.entries(data.attempt.fields).map(([k, v]) => `${k}: ${v}`).join(" • ")}
+          </div>
+          <div className="text-sm mb-4">
+            الدرجة: <span className="font-black text-[var(--gold)] text-lg" dir="ltr">{total} / {max}</span>
+            <span className="text-xs text-muted-foreground mr-3">{data.grading === "auto" ? "تصحيح تلقائي للاختيارات" : "تصحيح يدوي"}</span>
           </div>
           <div className="space-y-4">
             {data.items.map((it, i) => (
               <div key={it.id} className="rounded-lg border border-border p-4">
-                <div className="font-semibold mb-2 whitespace-pre-wrap">{i + 1}. {it.text}</div>
-                <div className="text-xs text-muted-foreground mb-2">{typeLabel[it.type]}{it.kind ? ` • ${it.kind === "core" ? "أساسي" : "اختياري"}` : ""}</div>
+                <div className="flex items-start gap-3">
+                  <div className="font-semibold mb-2 whitespace-pre-wrap flex-1">{i + 1}. {it.text}</div>
+                  {gradable ? (
+                    <label className="shrink-0 text-xs text-muted-foreground flex items-center gap-1" dir="ltr">
+                      <input
+                        type="number" min={0} max={it.points} step="any" className="input !w-20 !py-1 text-center"
+                        value={scores[it.id] ?? ""} placeholder="—"
+                        onChange={(e) => setScores({ ...scores, [it.id]: e.target.value })}
+                      />/ {it.points}
+                    </label>
+                  ) : (
+                    <div className="shrink-0 text-sm font-bold" dir="ltr">{it.score ?? "—"} / {it.points}</div>
+                  )}
+                </div>
+                <div className="text-xs text-muted-foreground mb-2">{typeLabel[it.type]}{it.kind ? ` • ${it.kind === "core" ? "أساسي" : "اختياري"}` : ""}{it.auto ? " • اتصحح تلقائي" : ""}</div>
                 <div className={`whitespace-pre-wrap rounded-md p-3 ${it.answer.trim() ? "bg-white/5" : "bg-destructive/10 text-destructive text-sm"}`}>
                   {it.answer.trim() || (it.images.length ? "(من غير نص — في صور)" : "(من غير إجابة)")}
                 </div>
+                {it.type === "choice" && it.correct_answer && (
+                  <div className={`mt-2 text-sm flex items-center gap-1 ${it.answer.trim() === it.correct_answer ? "text-emerald-500" : "text-destructive"}`}>
+                    {it.answer.trim() === it.correct_answer ? <CheckCircle2 className="h-4 w-4" /> : <XCircle className="h-4 w-4" />}
+                    الإجابة الصح: {it.correct_answer}
+                  </div>
+                )}
                 {it.images.length > 0 && (
                   <div className="flex flex-wrap gap-3 mt-3">
                     {it.images.map((n) => (
@@ -544,6 +629,12 @@ function AttemptModal({ id, onClose }: { id: string; onClose: () => void }) {
               </div>
             ))}
           </div>
+          {gradable && (
+            <div className="mt-5">
+              <button onClick={save} disabled={saving} className="btn-gold ripple inline-flex items-center gap-2 disabled:opacity-60"><Save className="h-4 w-4" />حفظ التصحيح</button>
+              <div className="text-xs text-muted-foreground mt-2">الأسئلة اللي من غير درجة بتتحسب صفر. بعد الحفظ النتيجة بتظهر للطالب في «نتائج اختباراتي».</div>
+            </div>
+          )}
         </div>
       )}
     </Modal>

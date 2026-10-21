@@ -9,6 +9,7 @@
 import crypto from "node:crypto";
 import { kvGetJSON, kvSetJSON, makeLock } from "./kv-store.server";
 import { signValue, verifySigned } from "./local-auth.server";
+import { bypasses, normBypass, type Bypass, type Viewer } from "./bypass";
 import { MAX_IMAGE_BYTES, deleteExamImages, detectImageExt, saveExamImage } from "./exam-images.server";
 
 const EXAMS_KEY = "bwd:exams";
@@ -21,6 +22,7 @@ const SUBMIT_GRACE_MS = 15_000;
 
 export type QType = "choice" | "short" | "long";
 export type QKind = "core" | "optional";
+export type GradingMode = "manual" | "auto";
 export type ExamAccess = "open" | "locked" | "hidden";
 export type ImageMode = "none" | "optional" | "required"; // none = من غير صور | optional = صور اختيارية | required = صورة إجبارية
 
@@ -34,6 +36,8 @@ export type Question = {
   image_mode: ImageMode; // هل الشخص يقدر/لازم يرفق صور مع إجابته
   max_images: number; // أقصى عدد صور للسؤال
   model_answer: string | null; // بيظهر للأدمن بس وقت المراجعة
+  points: number; // درجة السؤال
+  correct_answer: string | null; // للـ choice: نص الاختيار الصح (للتصحيح التلقائي) — مبيظهرش للطلاب
   sort_order: number;
   created_at: string;
 };
@@ -45,7 +49,9 @@ export type Exam = {
   published: boolean;
   access: ExamAccess; // open = مفتوح | locked = اسمه ظاهر وبكلمة سر | hidden = مشفّر (اسمه مخفي لحد كلمة السر)
   password: string | null;
-  fields: string[]; // بيانات الدخول — أول حقل = مفتاح تعريف الشخص
+  bypass: Bypass | null; // أشخاص/رتب تدخل من غير كلمة السر
+  fields: string[]; // (قديم) بيانات الدخول — دلوقتي البيانات بتتاخد من الحساب
+  grading: GradingMode; // manual = تصحيح يدوي | auto = الاختيارات تلقائي والنصي يدوي
   optional_count: number; // كام سؤال اختياري يتسحب لكل شخص
   shuffle: boolean; // ترتيب الأسئلة والاختيارات عشوائي
   attempt_minutes: number | null; // التايمر الشخصي (من لحظة فتح الاختبار)
@@ -67,6 +73,7 @@ export type ServedQuestion = {
   options: string[];
   image_mode: ImageMode;
   max_images: number;
+  points: number;
 };
 
 export type AttemptStatus = "in_progress" | "submitted" | "blocked" | "unblocked" | "retired";
@@ -77,7 +84,11 @@ export type Attempt = {
   id: string;
   exam_id: string;
   identity: string;
+  user_id: string | null; // صاحب الحساب (الاختبارات للمسجلين بس)
   fields: Record<string, string>;
+  scores: Record<string, number>; // درجات التصحيح اليدوي لكل سؤال
+  graded_at: string | null; // وقت ما الأدمن حفظ التصحيح
+  graded_by: string | null;
   token: string;
   attempt_no: number;
   status: AttemptStatus;
@@ -112,7 +123,9 @@ function normalizeExam(e: Partial<Exam>): Exam {
     published: e.published ?? false,
     access: e.access === "locked" || e.access === "hidden" ? e.access : "open",
     password: e.access === "locked" || e.access === "hidden" ? (e.password ?? null) : null,
+    bypass: e.access === "locked" || e.access === "hidden" ? normBypass(e.bypass) : null,
     fields: Array.isArray(e.fields) && e.fields.length ? e.fields : ["اسم الحساب", "الاسم"],
+    grading: e.grading === "auto" ? "auto" : "manual",
     optional_count: e.optional_count ?? 0,
     shuffle: e.shuffle ?? true,
     attempt_minutes: e.attempt_minutes ?? null,
@@ -138,6 +151,8 @@ async function readExamsDb(): Promise<ExamsDB> {
       image_mode: q.image_mode ?? "none",
       max_images: q.max_images ?? 3,
       model_answer: q.model_answer ?? null,
+      points: typeof q.points === "number" && q.points >= 0 ? q.points : 1,
+      correct_answer: q.correct_answer ?? null,
     })),
   };
 }
@@ -150,7 +165,11 @@ async function readAttemptsDb(): Promise<AttemptsDB> {
     attempts: (raw.attempts ?? []).map((a) => ({
       ...a,
       images: a.images ?? {},
-      questions: (a.questions ?? []).map((q) => ({ ...q, image_mode: q.image_mode ?? "none", max_images: q.max_images ?? 3 })),
+      user_id: a.user_id ?? null,
+      scores: a.scores ?? {},
+      graded_at: a.graded_at ?? null,
+      graded_by: a.graded_by ?? null,
+      questions: (a.questions ?? []).map((q) => ({ ...q, image_mode: q.image_mode ?? "none", max_images: q.max_images ?? 3, points: typeof q.points === "number" ? q.points : 1 })),
     })),
   };
 }
@@ -247,11 +266,12 @@ export type PublicExam = {
 };
 
 /** القايمة العامة: المنشور بس، والمشفّر (hidden) مبيظهرش خالص. */
-export async function listPublicExams(): Promise<PublicExam[]> {
+export async function listPublicExams(viewer: Viewer = null): Promise<PublicExam[]> {
   const db = await readExamsDb();
   const now = Date.now();
   return db.exams
-    .filter((e) => e.published && e.access !== "hidden")
+    // المشفّر مبيظهرش غير للمستثنين من كلمة سره
+    .filter((e) => e.published && (e.access !== "hidden" || bypasses(viewer, e.bypass)))
     .sort((a, b) => b.created_at.localeCompare(a.created_at))
     .map((e) => {
       const end = timeMs(e.ends_at);
@@ -262,7 +282,7 @@ export async function listPublicExams(): Promise<PublicExam[]> {
         ends_at: e.ends_at,
         attempt_minutes: e.attempt_minutes,
         closed: end !== null && now >= end,
-        locked: e.access === "locked",
+        locked: e.access === "locked" && !bypasses(viewer, e.bypass),
       };
     });
 }
@@ -270,7 +290,7 @@ export async function listPublicExams(): Promise<PublicExam[]> {
 export type PublicExamInfo = PublicExam & { fields: string[]; intro_message: string };
 
 export type PublicExamResult =
-  | { state: "ok"; info: PublicExamInfo }
+  | { state: "ok"; info: PublicExamInfo; token?: string } // token: للمستثنين من كلمة السر (بيتولّد من غير كلمة)
   | { state: "gate"; id: string; title: string | null } // لازم كلمة سر (العنوان بيظهر بس للمقفول مش المشفّر)
   | { state: "unavailable" };
 
@@ -301,13 +321,15 @@ function toPublic(e: Exam): PublicExamInfo {
  * المشفّر والمجهول والمسودة المقفولة كلهم بيرجعوا نفس الـ "gate" من غير عنوان،
  * فمحدش يقدر يعرف إن اختبار مشفّر موجود من غير كلمة السر.
  */
-export async function getPublicExam(id: string, token?: string | null): Promise<PublicExamResult> {
+export async function getPublicExam(id: string, token?: string | null, viewer: Viewer = null): Promise<PublicExamResult> {
   const db = await readExamsDb();
   const exam = db.exams.find((e) => e.id === id);
   if (!exam) return { state: "gate", id, title: null };
   if (exam.access === "open") return exam.published ? { state: "ok", info: toPublic(exam) } : { state: "unavailable" };
   if (!exam.published) return { state: "gate", id, title: null };
   if (await tokenOk(exam.id, token)) return { state: "ok", info: toPublic(exam) };
+  // مستثنى من كلمة السر: بندّيه توكن الدخول مباشرة
+  if (bypasses(viewer, exam.bypass)) return { state: "ok", info: toPublic(exam), token: await signValue(ACCESS_PURPOSE, exam.id, ACCESS_TTL) };
   return { state: "gate", id, title: exam.access === "locked" ? exam.title : null };
 }
 
@@ -388,14 +410,12 @@ export type StartResult =
       title: string;
     };
 
-function cleanFields(exam: Exam, input: Record<string, string>): Record<string, string> | null {
-  const out: Record<string, string> = {};
-  for (const label of exam.fields) {
-    const v = String(input?.[label] ?? "").trim().slice(0, 120);
-    if (!v) return null;
-    out[label] = v;
-  }
-  return out;
+/** المستخدم المسجّل اللي بيدخل الاختبار — بياناته بتتاخد من حسابه تلقائي. */
+export type ExamUser = { id: string; account_name: string; character_name: string };
+
+const identityOf = (u: ExamUser) => `u:${u.id}`;
+function fieldsOf(u: ExamUser): Record<string, string> {
+  return { "اسم الحساب": u.account_name, "الاسم": u.character_name };
 }
 
 /** بيحسم حالة الشخص لو عنده محاولات سابقة، من غير ما يعمل محاولة جديدة. */
@@ -432,7 +452,7 @@ function resolveExisting(
   return { result: null, dirty };
 }
 
-export async function startExam(examId: string, rawFields: Record<string, string>, accessToken?: string | null): Promise<StartResult> {
+export async function startExam(examId: string, user: ExamUser, accessToken?: string | null): Promise<StartResult> {
   return withLock(async () => {
     const exams = await readExamsDb();
     const exam = exams.exams.find((e) => e.id === examId);
@@ -441,10 +461,8 @@ export async function startExam(examId: string, rawFields: Record<string, string
       return { state: "error", error: "الاختبار ده محتاج كلمة سر" } as StartResult;
     }
 
-    const fields = cleanFields(exam, rawFields);
-    if (!fields) return { state: "error", error: "املأ كل البيانات المطلوبة" } as StartResult;
-
-    const identity = normalizeIdentity(fields[exam.fields[0]]);
+    const fields = fieldsOf(user);
+    const identity = identityOf(user);
     const attemptsDb = await readAttemptsDb();
     const now = Date.now();
     const mine = attemptsDb.attempts.filter((a) => a.exam_id === examId && a.identity === identity);
@@ -484,6 +502,7 @@ export async function startExam(examId: string, rawFields: Record<string, string
       options: q.type === "choice" ? (exam.shuffle ? shuffle(q.options) : q.options) : [],
       image_mode: q.image_mode,
       max_images: q.max_images,
+      points: q.points,
     }));
 
     const startedAt = new Date(now);
@@ -491,7 +510,11 @@ export async function startExam(examId: string, rawFields: Record<string, string
       id: crypto.randomUUID(),
       exam_id: examId,
       identity,
+      user_id: user.id,
       fields,
+      scores: {},
+      graded_at: null,
+      graded_by: null,
       token: crypto.randomBytes(24).toString("hex"),
       attempt_no: mine.length + 1,
       status: "in_progress",
@@ -537,7 +560,7 @@ export type PollResult =
   | { state: "blocked"; code: string; message: string };
 
 /** للشاشة بتاعة الحظر: تتأكد لو الأدمن فك الحظر (من غير ما تبدأ محاولة). */
-export async function pollExamState(examId: string, rawFields: Record<string, string>, accessToken?: string | null): Promise<PollResult> {
+export async function pollExamState(examId: string, user: ExamUser, accessToken?: string | null): Promise<PollResult> {
   return withLock(async () => {
     const exams = await readExamsDb();
     const exam = exams.exams.find((e) => e.id === examId);
@@ -545,9 +568,7 @@ export async function pollExamState(examId: string, rawFields: Record<string, st
     if (exam.access !== "open" && !(await tokenOk(exam.id, accessToken))) {
       return { state: "error", error: "الاختبار ده محتاج كلمة سر" } as PollResult;
     }
-    const fields = cleanFields(exam, rawFields);
-    if (!fields) return { state: "error", error: "بيانات ناقصة" } as PollResult;
-    const identity = normalizeIdentity(fields[exam.fields[0]]);
+    const identity = identityOf(user);
     const attemptsDb = await readAttemptsDb();
     const now = Date.now();
     const mine = attemptsDb.attempts.filter((a) => a.exam_id === examId && a.identity === identity);
@@ -712,13 +733,141 @@ export async function reportLeave(
   });
 }
 
+// ============================== التصحيح والدرجات ==============================
+
+export type QGrade = { id: string; max: number; score: number | null; auto: boolean };
+export type AttemptGrade = { items: QGrade[]; total: number; max: number; complete: boolean };
+
+const round2 = (n: number) => Math.round(n * 100) / 100;
+
+/**
+ * درجة كل سؤال: الدرجة اليدوية لو الأدمن حطها، وإلا (في التصحيح التلقائي) سؤال الاختيارات
+ * بيتقارن بالإجابة الصح اللي الأدمن محددها. غير كدا = لسه مستني تصحيح (null).
+ */
+export function gradeAttempt(att: Attempt, exam: Exam | undefined, live: Map<string, Question>): AttemptGrade {
+  const items: QGrade[] = att.questions.map((sq) => {
+    const max = sq.points;
+    const manual = att.scores[sq.id];
+    if (typeof manual === "number") return { id: sq.id, max, score: Math.min(max, Math.max(0, manual)), auto: false };
+    const key = live.get(sq.id)?.correct_answer;
+    if (exam?.grading === "auto" && sq.type === "choice" && key) {
+      const ans = (att.answers[sq.id] ?? "").trim();
+      return { id: sq.id, max, score: ans && ans === key.trim() ? max : 0, auto: true };
+    }
+    return { id: sq.id, max, score: null, auto: false };
+  });
+  const total = round2(items.reduce((s, i) => s + (i.score ?? 0), 0));
+  const max = round2(items.reduce((s, i) => s + i.max, 0));
+  return { items, total, max, complete: items.every((i) => i.score !== null) };
+}
+
+/** النتيجة بتظهر للطالب لو الأدمن حفظ التصحيح، أو (تلقائي) كل الأسئلة اتصححت. */
+function isReleased(att: Attempt, g: AttemptGrade): boolean {
+  if (att.status !== "submitted" && att.status !== "retired") return false;
+  return !!att.graded_at || g.complete;
+}
+
+/** حفظ تصحيح محاولة: درجة لكل سؤال (0 → الحد الأقصى للسؤال). الأسئلة اللي مفيهاش درجة بتتحسب 0. */
+export async function adminGradeAttempt(id: string, scores: Record<string, unknown>, gradedBy: string): Promise<{ total: number; max: number }> {
+  return withLock(async () => {
+    const attemptsDb = await readAttemptsDb();
+    const att = attemptsDb.attempts.find((a) => a.id === id);
+    if (!att) throw new Error("المحاولة غير موجودة");
+    if (att.status !== "submitted" && att.status !== "retired") throw new Error("المحاولة لسه ماتسلّمتش");
+    const exams = await readExamsDb();
+    const exam = exams.exams.find((e) => e.id === att.exam_id);
+    const live = new Map(exams.questions.map((q) => [q.id, q]));
+    const next: Record<string, number> = { ...att.scores };
+    for (const sq of att.questions) {
+      const raw = scores[sq.id];
+      if (raw === undefined || raw === null || raw === "") continue;
+      const n = Number(raw);
+      if (!Number.isFinite(n)) throw new Error("درجة غير صحيحة");
+      if (n < 0 || n > sq.points) throw new Error(`الدرجة لازم تكون بين 0 و ${sq.points}`);
+      next[sq.id] = round2(n);
+    }
+    att.scores = next;
+    // أي سؤال لسه من غير درجة (نصي لم يتصحح) بيتحسب صفر عند الحفظ
+    const after = gradeAttempt(att, exam, live);
+    for (const it of after.items) if (it.score === null) att.scores[it.id] = 0;
+    att.graded_at = new Date().toISOString();
+    att.graded_by = gradedBy;
+    await writeAttemptsDb(attemptsDb);
+    const final = gradeAttempt(att, exam, live);
+    return { total: final.total, max: final.max };
+  });
+}
+
+export type MyResultItem = {
+  id: string;
+  type: QType;
+  text: string;
+  options: string[];
+  answer: string;
+  max: number;
+  score: number;
+  verdict: "correct" | "partial" | "wrong";
+};
+export type MyResult = {
+  attempt_id: string;
+  exam_id: string;
+  exam_title: string;
+  attempt_no: number;
+  submitted_at: string | null;
+  graded: boolean;
+  total: number | null;
+  max: number;
+  items: MyResultItem[]; // فاضية لو لسه ماتصححش
+};
+
+/** نتائج اختبارات المستخدم نفسه — الدرجات والصح/الغلط بتظهر بعد التصحيح بس. */
+export async function myResults(userId: string): Promise<MyResult[]> {
+  const exams = await readExamsDb();
+  const attemptsDb = await readAttemptsDb();
+  const live = new Map(exams.questions.map((q) => [q.id, q]));
+  const out: MyResult[] = [];
+  for (const a of attemptsDb.attempts) {
+    if (a.user_id !== userId) continue;
+    if (a.status !== "submitted" && a.status !== "retired") continue;
+    const exam = exams.exams.find((e) => e.id === a.exam_id);
+    const g = gradeAttempt(a, exam, live);
+    const released = isReleased(a, g);
+    out.push({
+      attempt_id: a.id,
+      exam_id: a.exam_id,
+      exam_title: exam?.title ?? "(اختبار محذوف)",
+      attempt_no: a.attempt_no,
+      submitted_at: a.submitted_at,
+      graded: released,
+      total: released ? g.total : null,
+      max: g.max,
+      items: released
+        ? a.questions.map((sq, i) => {
+            const score = g.items[i].score ?? 0;
+            return {
+              id: sq.id,
+              type: sq.type,
+              text: sq.text,
+              options: sq.options,
+              answer: a.answers[sq.id] ?? "",
+              max: sq.points,
+              score,
+              verdict: score >= sq.points ? "correct" : score > 0 ? "partial" : "wrong",
+            } satisfies MyResultItem;
+          })
+        : [],
+    });
+  }
+  return out.sort((x, y) => (y.submitted_at ?? "").localeCompare(x.submitted_at ?? ""));
+}
+
 // ============================== Admin API ==============================
 
 export type ExamCan = {
   settings: Record<string, boolean>; // لكل مجموعة إعدادات: يقدر يعدّلها؟
   anySettings: boolean;
   questions: { view: boolean; add: boolean; edit: boolean; delete: boolean };
-  review: { view: boolean; delete: boolean };
+  review: { view: boolean; delete: boolean; grade: boolean };
   unblock: boolean;
   delete: boolean;
 };
@@ -768,13 +917,11 @@ export async function adminSaveExam(input: Partial<Exam>): Promise<Exam> {
     const db = await readExamsDb();
     const title = (input.title ?? "").trim();
     if (!title) throw new Error("عنوان الاختبار مطلوب");
-    const fields = (input.fields ?? []).map((f) => f.trim()).filter(Boolean);
-    if (!fields.length) throw new Error("لازم حقل واحد على الأقل في بيانات الدخول");
-
-    const base = {
+    const base: Partial<Exam> = {
       ...input,
       title,
-      fields,
+      fields: undefined, // بيانات الدخول بتتاخد من الحساب — الحقل القديم متروك زي ما هو
+      grading: input.grading === "auto" ? "auto" : input.grading === "manual" ? "manual" : undefined,
       optional_count: Math.max(0, Math.floor(Number(input.optional_count) || 0)),
       attempt_minutes: input.attempt_minutes ? Math.max(1, Math.floor(Number(input.attempt_minutes))) : null,
       ends_at: input.ends_at ? input.ends_at : null,
@@ -795,6 +942,7 @@ export async function adminSaveExam(input: Partial<Exam>): Promise<Exam> {
       }
     }
     Object.assign(base, { access: accessType, password });
+    for (const k of Object.keys(base) as (keyof Exam)[]) if (base[k] === undefined) delete base[k];
 
     if (idx >= 0) {
       db.exams[idx] = normalizeExam({ ...db.exams[idx], ...base, updated_at: now });
@@ -843,7 +991,15 @@ function cleanQuestion(input: Partial<Question>): Omit<Question, "id" | "created
     image_mode: input.image_mode === "optional" || input.image_mode === "required" ? input.image_mode : "none",
     max_images: Math.min(10, Math.max(1, Math.floor(Number(input.max_images) || 3))),
     model_answer: input.model_answer?.trim() ? input.model_answer.trim() : null,
+    points: cleanPoints(input.points),
+    correct_answer: type === "choice" && input.correct_answer && options.includes(input.correct_answer.trim()) ? input.correct_answer.trim() : null,
   };
+}
+
+function cleanPoints(v: unknown, fallback = 1): number {
+  const n = Number(v);
+  if (v === undefined || v === null || v === "" || !Number.isFinite(n)) return fallback;
+  return Math.min(1000, Math.max(0, Math.round(n * 100) / 100));
 }
 
 export async function adminSaveQuestion(input: Partial<Question>): Promise<Question> {
@@ -901,8 +1057,11 @@ export async function adminBulkAddQuestions(
     let added = 0;
     for (const block of blocks) {
       const lines = block.split("\n").map((l) => l.trim()).filter(Boolean);
-      const qLines = lines.filter((l) => !/^[-•*]\s*/.test(l));
-      const options = lines.filter((l) => /^[-•*]\s*/.test(l)).map((l) => l.replace(/^[-•*]\s*/, "").trim()).filter(Boolean);
+      const isOpt = (l: string) => /^[-•*+]\s*/.test(l);
+      const qLines = lines.filter((l) => !isOpt(l));
+      const optLines = lines.filter(isOpt);
+      const options = optLines.map((l) => l.replace(/^[-•*+]\s*/, "").trim()).filter(Boolean);
+      const correct = optLines.find((l) => l.startsWith("+"))?.replace(/^\+\s*/, "").trim() ?? null;
       const qText = qLines.join("\n").trim();
       if (!qText) continue;
       const type: QType = options.length >= 2 ? "choice" : defaultType;
@@ -916,6 +1075,8 @@ export async function adminBulkAddQuestions(
         image_mode: "none",
         max_images: 3,
         model_answer: null,
+        points: 1,
+        correct_answer: type === "choice" && correct && options.includes(correct) ? correct : null,
         sort_order: ++order,
         created_at: new Date().toISOString(),
       });
@@ -944,6 +1105,10 @@ export type AdminAttemptRow = {
   last_seen_at: string;
   answered: number;
   total: number;
+  score: number | null; // null = لسه فيه أسئلة مستنية تصحيح
+  max: number;
+  graded: boolean;
+  user_id: string | null;
 };
 
 export async function adminListAttempts(): Promise<AdminAttemptRow[]> {
@@ -957,6 +1122,7 @@ export async function adminListAttempts(): Promise<AdminAttemptRow[]> {
     }
     if (dirty) await writeAttemptsDb(attemptsDb);
     const titles = new Map(exams.exams.map((e) => [e.id, e.title]));
+    const qLive = new Map(exams.questions.map((q) => [q.id, q]));
     return attemptsDb.attempts
       .map((a) => ({
         id: a.id,
@@ -975,6 +1141,10 @@ export async function adminListAttempts(): Promise<AdminAttemptRow[]> {
         last_seen_at: a.last_seen_at,
         answered: a.questions.filter((q) => (a.answers[q.id] ?? "").trim() || (a.images[q.id] ?? []).length > 0).length,
         total: a.questions.length,
+        ...(() => {
+          const g = gradeAttempt(a, exams.exams.find((e) => e.id === a.exam_id), qLive);
+          return { score: g.complete || a.graded_at ? g.total : null, max: g.max, graded: isReleased(a, g), user_id: a.user_id };
+        })(),
       }))
       .sort((a, b) => (b.blocked_at ?? b.started_at).localeCompare(a.blocked_at ?? a.started_at));
   });
@@ -993,7 +1163,15 @@ export type AdminAttemptDetail = {
     images: string[];
     image_mode: ImageMode;
     model_answer: string | null;
+    points: number;
+    correct_answer: string | null;
+    score: number | null;
+    auto: boolean; // الدرجة اتحسبت تلقائي
   }[];
+  total: number;
+  max: number;
+  graded: boolean;
+  grading: GradingMode;
 };
 
 export async function adminGetAttempt(id: string): Promise<AdminAttemptDetail | null> {
@@ -1003,12 +1181,22 @@ export async function adminGetAttempt(id: string): Promise<AdminAttemptDetail | 
   if (!att) return null;
   const qMap = new Map(exams.questions.map((q) => [q.id, q]));
   const { token: _t, ...rest } = att;
+  const exam = exams.exams.find((e) => e.id === att.exam_id);
+  const g = gradeAttempt(att, exam, qMap);
   return {
     attempt: rest,
-    exam_title: exams.exams.find((e) => e.id === att.exam_id)?.title ?? "(اختبار محذوف)",
-    items: att.questions.map((sq) => {
+    exam_title: exam?.title ?? "(اختبار محذوف)",
+    total: g.total,
+    max: g.max,
+    graded: isReleased(att, g),
+    grading: exam?.grading ?? "manual",
+    items: att.questions.map((sq, i) => {
       const live = qMap.get(sq.id);
       return {
+        points: sq.points,
+        correct_answer: live?.correct_answer ?? null,
+        score: g.items[i].score,
+        auto: g.items[i].auto,
         id: sq.id,
         type: sq.type,
         text: sq.text,

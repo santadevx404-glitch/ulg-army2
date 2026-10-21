@@ -3,6 +3,7 @@
 // لتفاصيل الإعداد المطلوب على Vercel.
 import crypto from "node:crypto";
 import { kvGetJSON, kvSetJSON, makeLock } from "./kv-store.server";
+import { bypasses, normBypass, type Bypass, type Viewer } from "./bypass";
 
 const DB_KEY = "bwd:db";
 
@@ -14,9 +15,10 @@ export type Section = {
   sort_order: number;
   visible: boolean;
   password: string | null;
+  bypass: Bypass | null; // أشخاص/رتب تدخل من غير كلمة السر
 };
 
-export type PublicSection = Omit<Section, "password"> & { locked: boolean };
+export type PublicSection = Omit<Section, "password" | "bypass"> & { locked: boolean };
 
 export type GalleryImage = { url: string; caption: string };
 
@@ -32,15 +34,16 @@ export type Item = {
   sort_order: number;
   use_topics: boolean;
   password: string | null;
+  bypass: Bypass | null;
   created_at: string;
   updated_at: string;
 };
 
-export type PublicItem = Omit<Item, "password"> & { locked: boolean };
+export type PublicItem = Omit<Item, "password" | "bypass"> & { locked: boolean };
 
 export type PublicItemDetail =
   | { locked: true; id: string; title: string; section_name: string }
-  | ({ locked: false } & Omit<Item, "password"> & { sections: { name: string; slug: string } });
+  | ({ locked: false } & Omit<Item, "password" | "bypass"> & { sections: { name: string; slug: string } });
 
 export type Topic = {
   id: string;
@@ -55,11 +58,11 @@ type DB = { sections: Section[]; items: Item[]; topics: Topic[] };
 
 const DEFAULT_DB: DB = {
   sections: [
-    { id: "sec-achievements", slug: "achievements", name: "إنجازات حرس الحدود", icon: "Award", sort_order: 1, visible: true, password: null },
-    { id: "sec-weapons", slug: "weapons", name: "قسم الأسلحة", icon: "Crosshair", sort_order: 2, visible: true, password: null },
-    { id: "sec-vehicles", slug: "vehicles", name: "قسم السيارات", icon: "Truck", sort_order: 3, visible: true, password: null },
-    { id: "sec-courses", slug: "courses", name: "قسم الدورات", icon: "GraduationCap", sort_order: 4, visible: true, password: null },
-    { id: "sec-locations", slug: "locations", name: "الأماكن المعتمدة", icon: "MapPin", sort_order: 5, visible: true, password: null },
+    { id: "sec-achievements", slug: "achievements", name: "إنجازات حرس الحدود", icon: "Award", sort_order: 1, visible: true, password: null, bypass: null },
+    { id: "sec-weapons", slug: "weapons", name: "قسم الأسلحة", icon: "Crosshair", sort_order: 2, visible: true, password: null, bypass: null },
+    { id: "sec-vehicles", slug: "vehicles", name: "قسم السيارات", icon: "Truck", sort_order: 3, visible: true, password: null, bypass: null },
+    { id: "sec-courses", slug: "courses", name: "قسم الدورات", icon: "GraduationCap", sort_order: 4, visible: true, password: null, bypass: null },
+    { id: "sec-locations", slug: "locations", name: "الأماكن المعتمدة", icon: "MapPin", sort_order: 5, visible: true, password: null, bypass: null },
   ],
   items: [],
   topics: [],
@@ -78,20 +81,21 @@ function normalizeGallery(g: unknown): GalleryImage[] {
 async function readDb(): Promise<DB> {
   const parsed = await kvGetJSON<Partial<DB>>(DB_KEY, DEFAULT_DB);
   return {
-    sections: (parsed.sections ?? []).map((s) => ({ password: null, ...s })),
-    items: (parsed.items ?? []).map((i) => ({ password: null, ...i, gallery: normalizeGallery(i.gallery) })),
+    sections: (parsed.sections ?? []).map((s) => ({ password: null, ...s, bypass: normBypass(s.bypass) })),
+    items: (parsed.items ?? []).map((i) => ({ password: null, ...i, bypass: normBypass(i.bypass), gallery: normalizeGallery(i.gallery) })),
     topics: (parsed.topics ?? []).map((t) => ({ ...t, images: normalizeGallery((t as any).images) })),
   };
 }
 
-function sanitizeSection(s: Section): PublicSection {
-  const { password, ...rest } = s;
-  return { ...rest, locked: !!password };
+// locked = مقفول "بالنسبة للزائر ده": لو هو مستثنى (بالاسم أو الرتبة) مبيتحسبش مقفول وخانة كلمة السر مبتظهرلوش
+function sanitizeSection(s: Section, viewer: Viewer): PublicSection {
+  const { password, bypass, ...rest } = s;
+  return { ...rest, locked: !!password && !bypasses(viewer, bypass) };
 }
 
-function sanitizeItem(i: Item): PublicItem {
-  const { password, ...rest } = i;
-  return { ...rest, locked: !!password };
+function sanitizeItem(i: Item, viewer: Viewer): PublicItem {
+  const { password, bypass, ...rest } = i;
+  return { ...rest, locked: !!password && !bypasses(viewer, bypass) };
 }
 
 async function writeDb(db: DB): Promise<void> {
@@ -105,18 +109,19 @@ export async function getSections(): Promise<Section[]> {
   return [...db.sections].sort((a, b) => a.sort_order - b.sort_order);
 }
 
-export async function getPublicSections(): Promise<PublicSection[]> {
+export async function getPublicSections(viewer: Viewer = null): Promise<PublicSection[]> {
   const sections = await getSections();
-  return sections.map(sanitizeSection);
+  return sections.map((s) => sanitizeSection(s, viewer));
 }
 
 export async function getSectionWithItems(
   slug: string,
+  viewer: Viewer = null,
 ): Promise<{ section: PublicSection | null; items: PublicItem[] }> {
   const db = await readDb();
   const raw = db.sections.find((s) => s.slug === slug) ?? null;
   if (!raw) return { section: null, items: [] };
-  const section = sanitizeSection(raw);
+  const section = sanitizeSection(raw, viewer);
   if (section.locked) {
     // القسم مقفول بكلمة سر — منسيبش العناصر توصل للمتصفح قبل التحقق
     return { section, items: [] };
@@ -124,19 +129,19 @@ export async function getSectionWithItems(
   const items = db.items
     .filter((i) => i.section_id === raw.id && i.published)
     .sort((a, b) => a.sort_order - b.sort_order || b.created_at.localeCompare(a.created_at))
-    .map(sanitizeItem);
+    .map((i) => sanitizeItem(i, viewer));
   return { section, items };
 }
 
-export async function unlockSection(slug: string, password: string): Promise<PublicItem[] | null> {
+export async function unlockSection(slug: string, password: string, viewer: Viewer = null): Promise<PublicItem[] | null> {
   const db = await readDb();
   const raw = db.sections.find((s) => s.slug === slug);
   if (!raw) return null;
-  if (raw.password && raw.password !== password) return null;
+  if (raw.password && raw.password !== password && !bypasses(viewer, raw.bypass)) return null;
   return db.items
     .filter((i) => i.section_id === raw.id && i.published)
     .sort((a, b) => a.sort_order - b.sort_order || b.created_at.localeCompare(a.created_at))
-    .map(sanitizeItem);
+    .map((i) => sanitizeItem(i, viewer));
 }
 
 export async function saveSection(payload: Partial<Section>): Promise<Section> {
@@ -145,7 +150,7 @@ export async function saveSection(payload: Partial<Section>): Promise<Section> {
     if (payload.id) {
       const idx = db.sections.findIndex((s) => s.id === payload.id);
       if (idx === -1) throw new Error("القسم غير موجود");
-      db.sections[idx] = { ...db.sections[idx], ...payload } as Section;
+      db.sections[idx] = { ...db.sections[idx], ...payload, ...("bypass" in payload ? { bypass: normBypass(payload.bypass) } : {}) } as Section;
       await writeDb(db);
       return db.sections[idx];
     }
@@ -157,6 +162,7 @@ export async function saveSection(payload: Partial<Section>): Promise<Section> {
       sort_order: payload.sort_order ?? db.sections.length + 1,
       visible: payload.visible ?? true,
       password: payload.password?.trim() ? payload.password.trim() : null,
+      bypass: normBypass(payload.bypass),
     };
     if (db.sections.some((s) => s.slug === section.slug)) {
       throw new Error("المُعرِّف ده مستخدم بالفعل");
@@ -186,15 +192,16 @@ export async function getItems(): Promise<Item[]> {
 export async function getItemWithSection(
   id: string,
   password?: string,
+  viewer: Viewer = null,
 ): Promise<PublicItemDetail | null> {
   const db = await readDb();
   const item = db.items.find((i) => i.id === id);
   if (!item) return null;
   const section = db.sections.find((s) => s.id === item.section_id);
-  if (item.password && item.password !== password) {
+  if (item.password && item.password !== password && !bypasses(viewer, item.bypass)) {
     return { locked: true, id: item.id, title: item.title, section_name: section?.name ?? "" };
   }
-  const { password: _pw, ...rest } = item;
+  const { password: _pw, bypass: _bp, ...rest } = item;
   return { locked: false, ...rest, sections: { name: section?.name ?? "", slug: section?.slug ?? "" } };
 }
 
@@ -205,7 +212,7 @@ export async function saveItem(payload: Partial<Item>): Promise<Item> {
     if (payload.id) {
       const idx = db.items.findIndex((i) => i.id === payload.id);
       if (idx === -1) throw new Error("العنصر غير موجود");
-      db.items[idx] = { ...db.items[idx], ...payload, updated_at: now } as Item;
+      db.items[idx] = { ...db.items[idx], ...payload, ...("bypass" in payload ? { bypass: normBypass(payload.bypass) } : {}), updated_at: now } as Item;
       await writeDb(db);
       return db.items[idx];
     }
@@ -221,6 +228,7 @@ export async function saveItem(payload: Partial<Item>): Promise<Item> {
       sort_order: payload.sort_order ?? 0,
       use_topics: payload.use_topics ?? false,
       password: payload.password?.trim() ? payload.password.trim() : null,
+      bypass: normBypass(payload.bypass),
       created_at: now,
       updated_at: now,
     };
