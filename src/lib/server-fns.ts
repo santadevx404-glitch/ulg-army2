@@ -86,12 +86,13 @@ export const currentUserFn = createServerFn({ method: "GET" }).handler(async () 
   if (!actor) return null;
   const { user } = actor;
   const perms = [...actor.perms];
-  const tabs = visibleTabs(actor.perms, actor.owner);
+  const tabs = visibleTabs(actor.perms, actor.full);
   const title = actor.owner ? user.display_title || "الأدمن الأساسي" : null;
   return {
     id: user.id,
     email: user.email,
     owner: actor.owner,
+    full: actor.full,
     perms,
     tabs,
     // role محتفظين بيه للتوافق: "admin" = عنده أي حاجة في لوحة التحكم
@@ -118,7 +119,7 @@ export type BypassOptions = {
 /** الرتب والأشخاص اللي ينفع تستثنيهم من كلمة السر — لمن يقدر يعدّل كلمة سر قسم/عنصر/اختبار. */
 export const bypassOptionsFn = createServerFn({ method: "GET" }).handler(async (): Promise<BypassOptions> => {
   const actor = await requireActor();
-  const ok = actor.owner || ["sections.edit.password", "items.edit.password", "exams.manage.settings.access"].some((k) => access.canAny(actor, k));
+  const ok = actor.full || ["sections.edit.password", "items.edit.password", "exams.manage.settings.access"].some((k) => access.canAny(actor, k));
   if (!ok) throw new Error("ليس لديك صلاحية لهذا الإجراء");
   const [ranks, users] = await Promise.all([access.listRanks(), auth.listUsers()]);
   return {
@@ -141,7 +142,7 @@ export const sectionsAdminFn = createServerFn({ method: "GET" }).handler(async (
   const [sections, items] = await Promise.all([store.getSections(), store.getItems()]);
   const visible = sections.filter(
     (s) =>
-      actor.owner ||
+      actor.full ||
       access.canAnyAt(actor, "sections", { section: s.id }) ||
       access.canAnyAt(actor, "items", { section: s.id }) ||
       access.can(actor, "items.create", { section: s.id }) || // عشان يختار القسم وهو بيضيف عنصر
@@ -193,7 +194,7 @@ export const saveSectionFn = createServerFn({ method: "POST" })
     }
     access.assertCan(actor, "sections.create");
     const created = await store.saveSection(data);
-    if (!actor.owner) await auth.addGrants(actor.user.id, [wildcardKey("section", created.id)]); // اللي عمل القسم يديره
+    if (!actor.full) await auth.addGrants(actor.user.id, [wildcardKey("section", created.id)]); // اللي عمل القسم يديره
     await audit.logAdmin(actor, { category: "sections", action: "section.create", summary: `أنشأ قسم «${created.name}»`, target: created.name });
     return created;
   });
@@ -219,7 +220,7 @@ export const deleteSectionFn = createServerFn({ method: "POST" })
 export const itemsAdminFn = createServerFn({ method: "GET" }).handler(async () => {
   const actor = await requireActor();
   const items = await store.getItems();
-  const visible = actor.owner ? items : items.filter((i) => access.canAnyAt(actor, "items", { section: i.section_id, item: i.id }));
+  const visible = actor.full ? items : items.filter((i) => access.canAnyAt(actor, "items", { section: i.section_id, item: i.id }));
   return visible.map((i) =>
     access.can(actor, "items.edit.password", { section: i.section_id, item: i.id }) ? i : { ...i, password: i.password ? MASK : null },
   );
@@ -259,7 +260,7 @@ export const saveItemFn = createServerFn({ method: "POST" })
     if (!data.section_id) throw new Error("القسم مطلوب");
     access.assertCan(actor, "items.create", { section: data.section_id });
     const created = await store.saveItem(data);
-    if (!actor.owner) await auth.addGrants(actor.user.id, [wildcardKey("item", created.id)]);
+    if (!actor.full) await auth.addGrants(actor.user.id, [wildcardKey("item", created.id)]);
     await audit.logAdmin(actor, { category: "items", action: "item.create", summary: `أضاف عنصر «${created.title}»`, target: created.title });
     return created;
   });

@@ -40,7 +40,7 @@ export const activeAnnouncementsFn = createServerFn({ method: "POST" })
   .validator((d: { path: string }) => d)
   .handler(async ({ data }): Promise<ann.PublicAnnouncement[]> => {
     const actor = await access.actorFromUserId(await auth.verifySessionToken(getCookie(auth.SESSION_COOKIE)));
-    const viewer: ann.Viewer = { loggedIn: !!actor, owner: !!actor?.owner, rank_ids: actor?.user.rank_ids ?? [] };
+    const viewer: ann.Viewer = { loggedIn: !!actor, owner: !!actor?.full, rank_ids: actor?.user.rank_ids ?? [] };
     return ann.activeFor(await tokensForPath(data.path), viewer);
   });
 
@@ -61,7 +61,7 @@ export const announcementsAdminFn = createServerFn({ method: "GET" }).handler(as
   const actor = await requireActor();
   access.assertCanAny(actor, ["announcements"]);
   return (await ann.listAnnouncements())
-    .filter((a) => actor.owner || access.canAnyAt(actor, "announcements", { announcement: a.id }))
+    .filter((a) => actor.full || access.canAnyAt(actor, "announcements", { announcement: a.id }))
     .map((a) => ({ ...a, can: annCan(actor, a.id) }));
 });
 
@@ -124,7 +124,7 @@ export const saveAnnouncementFn = createServerFn({ method: "POST" })
     }
     access.assertCan(actor, "announcements.create");
     const created = await ann.saveAnnouncement({ ...data, id: undefined }, validRanks);
-    if (!actor.owner) await auth.addGrants(actor.user.id, [wildcardKey("announcement", created.id)]); // اللي عمل الإعلان يديره
+    if (!actor.full) await auth.addGrants(actor.user.id, [wildcardKey("announcement", created.id)]); // اللي عمل الإعلان يديره
     await audit.logAdmin(actor, {
       category: "announcements", action: "announcement.create", summary: `أنشأ إعلان «${created.title}»`, target: created.title,
       note: `الأماكن: ${await targetLabels(created.targets)}\nالجمهور: ${AUDIENCE_LABEL[created.audience]}${created.audience === "ranks" ? ` (${rankNames(created.rank_ids)})` : ""}`,

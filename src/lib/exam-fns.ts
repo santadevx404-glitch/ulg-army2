@@ -105,7 +105,7 @@ export const adminExamsFn = createServerFn({ method: "GET" }).handler(async () =
   const actor = await requireActor();
   const list = await exams.adminListExams();
   return list
-    .filter((e) => actor.owner || access.canAnyAt(actor, "exams", { exam: e.id }))
+    .filter((e) => actor.full || access.canAnyAt(actor, "exams", { exam: e.id }))
     .map((e) => {
       const can = examCan(actor, e.id);
       // كلمة سر الاختبار مبتظهرش غير لمن يقدر يعدّل نوع الاختبار
@@ -137,7 +137,7 @@ export const adminSaveExamFn = createServerFn({ method: "POST" })
     }
     access.assertCan(actor, "exams.create");
     const created = await exams.adminSaveExam(data);
-    if (!actor.owner) await auth.addGrants(actor.user.id, [wildcardKey("exam", created.id)]); // اللي عمل الاختبار يديره
+    if (!actor.full) await auth.addGrants(actor.user.id, [wildcardKey("exam", created.id)]); // اللي عمل الاختبار يديره
     await audit.logAdmin(actor, { category: "exams", action: "exam.create", summary: `أنشأ اختبار «${created.title}»`, target: created.title });
     return created;
   });
@@ -217,7 +217,7 @@ export const adminAttemptsFn = createServerFn({ method: "GET" }).handler(async (
   const actor = await requireActor();
   access.assertCanAny(actor, ["exams.review", "exams.unblock"]);
   const rows = await exams.adminListAttempts();
-  if (actor.owner) return rows;
+  if (actor.full) return rows;
   return rows.filter(
     (r) => access.can(actor, "exams.review.view", { exam: r.exam_id }) || access.can(actor, "exams.unblock", { exam: r.exam_id }),
   );

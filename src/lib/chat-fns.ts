@@ -248,13 +248,13 @@ export const chatsAdminFn = createServerFn({ method: "GET" }).handler(async (): 
   access.assertCanAny(actor, ["chats"]);
   const [chats, counts] = await Promise.all([chat.listChats(), chat.messageCounts()]);
   return chats
-    .filter((c) => actor.owner || access.canAnyAt(actor, "chats", { chat: c.id }))
+    .filter((c) => actor.full || access.canAnyAt(actor, "chats", { chat: c.id }))
     .map((c) => ({ ...c, messages: counts[c.id] ?? 0, can: chatCan(actor, c.id) }));
 });
 
 /** مينفعش حد يدّي دردشة لرتبة مش معاه هو (غير صاحب الموقع). */
 function assertCanAddRanks(actor: access.Actor, before: string[], after: string[]) {
-  if (actor.owner) return;
+  if (actor.full) return;
   for (const id of after) {
     if (!before.includes(id) && !actor.user.rank_ids.includes(id)) throw new Error("مينفعش تدّي دردشة لرتبة مش معاك");
   }
@@ -296,7 +296,7 @@ export const saveChatFn = createServerFn({ method: "POST" })
     access.assertCan(actor, "chats.create");
     assertCanAddRanks(actor, [], data.rank_ids ?? []);
     const created = await chat.saveChat(data as Parameters<typeof chat.saveChat>[0], ranks);
-    if (!actor.owner) await auth.addGrants(actor.user.id, [wildcardKey("chat", created.id)]); // اللي عمل الدردشة يديرها
+    if (!actor.full) await auth.addGrants(actor.user.id, [wildcardKey("chat", created.id)]); // اللي عمل الدردشة يديرها
     await audit.logAdmin(actor, { category: "chats", action: "chat.create", summary: `أنشأ دردشة «${created.name}»`, target: created.name, note: `الرتب: ${(await rankNames(created.rank_ids)) ?? "بدون رتب"}` });
     return created;
   });
@@ -330,5 +330,5 @@ export const clearChatFn = createServerFn({ method: "POST" })
 export const chatRankOptionsFn = createServerFn({ method: "GET" }).handler(async () => {
   const actor = await requireActor();
   access.assertCanAny(actor, ["chats"]);
-  return (await access.listRanks()).map((r) => ({ id: r.id, name: r.name, mine: actor.owner || actor.user.rank_ids.includes(r.id) }));
+  return (await access.listRanks()).map((r) => ({ id: r.id, name: r.name, mine: actor.full || actor.user.rank_ids.includes(r.id) }));
 });

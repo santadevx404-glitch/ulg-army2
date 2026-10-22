@@ -35,7 +35,7 @@ export const Route = createFileRoute("/api/storage-check")({
     handlers: {
       GET: async ({ request }: { request: Request }) => {
         const actor = await access.actorFromRequest(request);
-        if (!actor?.owner) return json({ error: "للأدمن الأساسي بس" }, 403);
+        if (!actor?.full) return json({ error: "للأدمن الأساسي بس" }, 403);
 
         let host: string | null = null;
         try { host = process.env.SUPABASE_URL ? new URL(process.env.SUPABASE_URL).host : null; } catch { /* ignore */ }

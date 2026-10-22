@@ -18,6 +18,9 @@ async function requireActor(): Promise<access.Actor> {
 function ownerOnly(actor: access.Actor) {
   if (!actor.owner) throw new Error("ده للأدمن الأساسي بس");
 }
+function fullOnly(actor: access.Actor) {
+  if (!actor.full) throw new Error("ده لأصحاب الصلاحيات الكاملة بس");
+}
 
 /** أسماء الأقسام/العناصر/الاختبارات عشان نكتب الصلاحيات المخصصة بشكل مقروء في السجل. */
 async function permTexts(keys: string[]): Promise<string[]> {
@@ -195,13 +198,13 @@ export const membersListFn = createServerFn({ method: "GET" }).handler(async ():
   access.assertCanAny(actor, ["accounts.members", "staff"]);
   const [users, ranks] = await Promise.all([auth.listUsers(), access.listRanks()]);
   return users
-    .filter((u) => (u.status === "active" || u.status === "disabled") && (actor.owner || !u.hidden)) // المخفيين للأدمن الأساسي بس
+    .filter((u) => (u.status === "active" || u.status === "disabled") && (actor.full || !u.hidden)) // المخفيين للأدمن الأساسي بس
     .sort((a, b) => a.created_at.localeCompare(b.created_at))
     .map((u) => {
       const userRanks = u.rank_ids.map((id) => ranks.find((r) => r.id === id)).filter((r): r is access.Rank => !!r).sort((a, b) => a.order - b.order);
       const owner = auth.isOwner(u);
       const eff = access.effectivePerms(u, userRanks);
-      const manageable = !owner && u.id !== actor.user.id && (actor.owner || [...eff].every((k) => access.actorCovers(actor, k)));
+      const manageable = !owner && u.id !== actor.user.id && (actor.full || [...eff].every((k) => access.actorCovers(actor, k)));
       return {
         id: u.id,
         email: u.email,
@@ -312,7 +315,7 @@ export const setMemberHiddenFn = createServerFn({ method: "POST" })
   .validator((d: { id: string; hidden: boolean }) => d)
   .handler(async ({ data }) => {
     const actor = await requireActor();
-    ownerOnly(actor);
+    fullOnly(actor);
     const target = await auth.getUserById(data.id);
     if (!target) throw new Error("الحساب غير موجود");
     await auth.setUserHidden(data.id, !!data.hidden);
@@ -332,7 +335,7 @@ export const ranksListFn = createServerFn({ method: "GET" }).handler(async (): P
   access.assertCanAny(actor, ["ranks", "staff", "accounts.requests", "accounts.members"]);
   const [ranks, users] = await Promise.all([access.listRanks(), auth.listUsers()]);
   // المخفيين مبيتحسبوش لغير الأدمن الأساسي
-  const counted = users.filter((u) => u.status !== "rejected" && (actor.owner || !u.hidden));
+  const counted = users.filter((u) => u.status !== "rejected" && (actor.full || !u.hidden));
   return ranks.map((r) => ({ ...r, members: counted.filter((u) => u.rank_ids.includes(r.id)).length }));
 });
 
@@ -399,7 +402,7 @@ export const auditListFn = createServerFn({ method: "POST" })
   .validator((d: { offset?: number; limit?: number; category?: string; search?: string }) => d)
   .handler(async ({ data }) => {
     const actor = await requireActor();
-    ownerOnly(actor);
+    fullOnly(actor);
     return audit.listAdminAudit(data);
   });
 
@@ -407,6 +410,6 @@ export const loginLogFn = createServerFn({ method: "POST" })
   .validator((d: { offset?: number; limit?: number; status?: string; search?: string }) => d)
   .handler(async ({ data }) => {
     const actor = await requireActor();
-    ownerOnly(actor);
+    fullOnly(actor);
     return audit.listLogins(data);
   });

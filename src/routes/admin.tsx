@@ -60,7 +60,7 @@ function AdminPage() {
         <motion.h1 initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="text-4xl font-black gold-text">
           لوحة التحكم
         </motion.h1>
-        {me.owner && <StorageStatus />}
+        {me.full && <StorageStatus />}
       </div>
 
       <div className="flex flex-wrap gap-2 mb-6 border-b border-border">

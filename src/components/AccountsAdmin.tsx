@@ -33,7 +33,7 @@ export function usePendingRequestsCount() {
 
 function useAllowed() {
   const { me } = useMe();
-  return (key: string) => !!me && covers(me.perms, me.owner, key);
+  return (key: string) => !!me && covers(me.perms, me.full, key);
 }
 
 // ============================== طلبات الحسابات ==============================
@@ -205,7 +205,7 @@ export function MembersAdmin() {
                 </div>
               </div>
               <div className="flex gap-1 flex-wrap">
-                {me?.owner && !m.is_owner && (
+                {me?.full && !m.is_owner && (
                   <button title={m.hidden ? "إظهار في قايمة الأعضاء" : "إخفاء من قايمة الأعضاء"} onClick={() => run(() => setMemberHiddenFn({ data: { id: m.id, hidden: !m.hidden } }), m.hidden ? "ظهر في القايمة" : "اتخفى من القايمة")} className="p-2 hover:text-[var(--gold)]">
                     {m.hidden ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
                   </button>
