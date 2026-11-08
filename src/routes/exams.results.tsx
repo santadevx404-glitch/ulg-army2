@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import { ArrowRight, Award, CheckCircle2, ChevronDown, Hourglass, MinusCircle, XCircle } from "lucide-react";
 import { myExamResultsFn } from "@/lib/exam-fns";
+import { formatAnswer } from "@/lib/answer-format";
 import { useMe } from "@/lib/use-me";
 import type { MyResult } from "@/lib/exams.server";
 
@@ -88,7 +89,7 @@ function ResultCard({ r }: { r: MyResult }) {
                   <div className="whitespace-pre-wrap leading-loose">{it.text}</div>
                   <div className="mt-2 text-sm">
                     <span className="text-muted-foreground">إجابتك: </span>
-                    <span className="whitespace-pre-wrap break-words">{it.answer.trim() || "— لم تُجب —"}</span>
+                    <span className="whitespace-pre-wrap break-words">{formatAnswer(it.type, it.answer) || "— لم تُجب —"}</span>
                   </div>
                 </div>
                 <div className="text-sm font-bold shrink-0" dir="ltr">{num(it.score)} / {num(it.max)}</div>

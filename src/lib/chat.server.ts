@@ -52,8 +52,8 @@ type UploadReg = Record<string, { user_id: string; chat_id: string; used: boolea
 const withLock = makeLock();
 
 /** يقدر يفتح الدردشة؟ صاحب الموقع دايمًا، وغيره لازم الدردشة تكون شغالة ومعاه إحدى رتبها. */
-export function canOpenChat(actor: { owner: boolean; user: { rank_ids: string[] } }, c: Chat): boolean {
-  if (actor.owner) return true;
+export function canOpenChat(actor: { full: boolean; user: { rank_ids: string[] } }, c: Chat): boolean {
+  if (actor.full) return true;
   return c.enabled && c.rank_ids.some((id) => actor.user.rank_ids.includes(id));
 }
 

@@ -155,6 +155,8 @@ export const EXAMS_DELETE: PNode = { key: "exams.delete", label: "حذف الا�
 
 /** الصلاحيات العامة (على كل حاجة من النوع). */
 export const GLOBAL_TREE: PNode[] = [
+  { key: "bypass_all", label: "الدخول لأي قسم أو عنصر أو اختبار من غير كلمة سر" },
+  { key: "full", label: "الصلاحيات الكاملة" },
   {
     key: "sections",
     label: "الأقسام",

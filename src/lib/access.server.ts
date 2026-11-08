@@ -39,7 +39,8 @@ export async function listRanks(): Promise<Rank[]> {
 
 export type Actor = {
   user: auth.User;
-  owner: boolean;
+  owner: boolean; // صاحب الموقع الفعلي (للهوية والعرض)
+  full: boolean; // صلاحيات كاملة: صاحب الموقع أو حد معاه صلاحية "صلاحيات كاملة" — بيعدّي على كل الفحوصات
   perms: Set<string>;
   ranks: Rank[];
   rankNames: string[];
@@ -67,7 +68,8 @@ export async function actorFromUserId(uid: string | null): Promise<Actor | null>
   if (!user || user.status !== "active") return null;
   const ranks = ranksOfUser(user, allRanks);
   const owner = auth.isOwner(user);
-  return { user, owner, ranks, rankNames: ranks.map((r) => r.name), perms: owner ? new Set() : effectivePerms(user, ranks) };
+  const perms = owner ? new Set<string>() : effectivePerms(user, ranks);
+  return { user, owner, full: owner || perms.has("full"), ranks, rankNames: ranks.map((r) => r.name), perms };
 }
 
 /** للـ API routes اللي بتستقبل Request خام: بنقرا كوكي الجلسة بنفسنا. */
@@ -79,15 +81,15 @@ export async function actorFromRequest(request: Request): Promise<Actor | null> 
 }
 
 export function can(actor: Actor, perm: string, scope?: Scope): boolean {
-  return hasPerm(actor.perms, actor.owner, perm, scope);
+  return hasPerm(actor.perms, actor.full, perm, scope);
 }
 /** أي صلاحية مرتبطة بالمفتاح ده (عامة أو على أي حاجة). */
 export function canAny(actor: Actor, perm: string): boolean {
-  return hasAnyPerm(actor.perms, actor.owner, perm);
+  return hasAnyPerm(actor.perms, actor.full, perm);
 }
 /** أي صلاحية مرتبطة بالمفتاح ده على الـ scope ده بالذات. */
 export function canAnyAt(actor: Actor, perm: string, scope: Scope): boolean {
-  return hasAnyPermAt(actor.perms, actor.owner, perm, scope);
+  return hasAnyPermAt(actor.perms, actor.full, perm, scope);
 }
 export function assertCan(actor: Actor, perm: string, scope?: Scope): void {
   if (!can(actor, perm, scope)) throw new Error("ليس لديك صلاحية لهذا الإجراء");
@@ -104,7 +106,7 @@ export function assertCanGroups(actor: Actor, prefix: string, groups: FieldGroup
   if (denied.length) throw new Error(`ليس لديك صلاحية تعديل: ${denied.map((g) => g.label).join("، ")}`);
 }
 export function actorCovers(actor: Actor, key: string): boolean {
-  return covers(actor.perms, actor.owner, key);
+  return covers(actor.perms, actor.full, key);
 }
 
 // ============================== الرتب ==============================
@@ -166,10 +168,10 @@ async function targetEffective(target: auth.User): Promise<Set<string>> {
 /** هل الـ actor يقدر يتعامل مع الشخص ده؟ لازم يغطي كل صلاحياته ومايكونش هو نفسه ولا الأدمن الأساسي. المخفيين كأنهم مش موجودين. */
 export async function assertCanActOn(actor: Actor, targetId: string, opts: { allowSelf?: boolean } = {}): Promise<auth.User> {
   const target = await auth.getUserById(targetId);
-  if (!target || (target.hidden && !actor.owner)) throw new Error("الحساب غير موجود");
+  if (!target || (target.hidden && !actor.full)) throw new Error("الحساب غير موجود");
   if (auth.isOwner(target)) throw new Error("مينفعش التعديل على الأدمن الأساسي");
   if (!opts.allowSelf && target.id === actor.user.id) throw new Error("مينفعش تعمل ده على حسابك أنت");
-  if (!actor.owner && target.status === "active") {
+  if (!actor.full && target.status === "active") {
     assertCoversAll(actor, await targetEffective(target), "الشخص ده صلاحياته أكبر من صلاحياتك");
   }
   return target;

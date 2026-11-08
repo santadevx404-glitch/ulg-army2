@@ -7,6 +7,7 @@
 //    بيحصل عند أي طلب بعد انتهاء الوقت، فمش معتمد على المتصفح.
 //  - الشخص بيتعرّف بأول حقل في "بيانات الدخول" (مثلاً اسم الحساب).
 import crypto from "node:crypto";
+import { TF_FALSE, TF_TRUE, normText, parseFix, parseTfFix } from "./answer-format";
 import { kvGetJSON, kvSetJSON, makeLock } from "./kv-store.server";
 import { signValue, verifySigned } from "./local-auth.server";
 import { bypasses, normBypass, type Bypass, type Viewer } from "./bypass";
@@ -20,7 +21,7 @@ const SUBMIT_GRACE_MS = 15_000;
 
 // ============================== Types ==============================
 
-export type QType = "choice" | "short" | "long";
+export type QType = "choice" | "short" | "long" | "tf" | "tf_fix" | "fix";
 export type QKind = "core" | "optional";
 export type GradingMode = "manual" | "auto";
 export type ExamAccess = "open" | "locked" | "hidden";
@@ -30,14 +31,15 @@ export type Question = {
   id: string;
   exam_id: string;
   kind: QKind; // core = أساسي بيظهر للكل | optional = بيتسحب عشوائي
-  type: QType; // choice = اختيارات | short = إجابة قصيرة | long = إجابة طويلة
+  type: QType; // choice = اختيارات | short/long = نصي | tf = صح/خطأ | tf_fix = صح/خطأ مع التصويب | fix = صحح المعلومة
   text: string;
   options: string[]; // للـ choice بس
   image_mode: ImageMode; // هل الشخص يقدر/لازم يرفق صور مع إجابته
   max_images: number; // أقصى عدد صور للسؤال
   model_answer: string | null; // بيظهر للأدمن بس وقت المراجعة
   points: number; // درجة السؤال
-  correct_answer: string | null; // للـ choice: نص الاختيار الصح (للتصحيح التلقائي) — مبيظهرش للطلاب
+  correct_answer: string | null; // choice: نص الاختيار الصح | tf/tf_fix: "صح" أو "خطأ" | fix: الكلمة الصح اللي تتكتب مكان الغلط (للتصحيح التلقائي) — مبيظهرش للطلاب
+  wrong_part: string | null; // fix بس: الكلمة/الكلمتين الغلط جوه نص السؤال
   sort_order: number;
   created_at: string;
 };
@@ -154,6 +156,7 @@ async function readExamsDb(): Promise<ExamsDB> {
       model_answer: q.model_answer ?? null,
       points: typeof q.points === "number" && q.points >= 0 ? q.points : 1,
       correct_answer: q.correct_answer ?? null,
+      wrong_part: q.wrong_part ?? null,
     })),
   };
 }
@@ -747,15 +750,47 @@ const round2 = (n: number) => Math.round(n * 100) / 100;
  * درجة كل سؤال: الدرجة اليدوية لو الأدمن حطها، وإلا (في التصحيح التلقائي) سؤال الاختيارات
  * بيتقارن بالإجابة الصح اللي الأدمن محددها. غير كدا = لسه مستني تصحيح (null).
  */
+/**
+ * تصحيح تلقائي لسؤال: بيرجّع الدرجة، أو null لو محتاج تصحيح يدوي.
+ *  - choice / tf: مقارنة بالإجابة الصح.
+ *  - tf_fix: اختيار غلط = 0، "صح" صح = كاملة، "خطأ" صح = بيستنى تصويب يدوي.
+ *  - fix: نفس الكلمة الغلط + نفس التصويب بالظبط = كاملة، غير كدا = يدوي (ممكن يكون مرادف صحيح)، ومفيش إجابة = 0.
+ */
+function autoScore(type: QType, rawAnswer: string, q: Question | undefined, max: number): number | null {
+  const key = q?.correct_answer?.trim();
+  const ans = (rawAnswer ?? "").trim();
+  if (!key) return null;
+  if (type === "choice" || type === "tf") return ans && ans === key ? max : 0;
+  if (type === "tf_fix") {
+    const { verdict } = parseTfFix(ans);
+    if (!verdict || verdict !== key) return 0;
+    return key === TF_TRUE ? max : null;
+  }
+  if (type === "fix") {
+    const f = parseFix(ans);
+    if (!f || !f.from.trim()) return 0;
+    if (q?.wrong_part && normText(f.from) === normText(q.wrong_part) && normText(f.to) === normText(key)) return max;
+    return null;
+  }
+  return null;
+}
+
+/** نص "الإجابة الصح" اللي بيظهر للطالب لما التصحيح يبقى تلقائي ومش كامل. */
+function autoFeedback(type: QType, q: Question | undefined): string | null {
+  if (!q?.correct_answer) return null;
+  if (type === "fix") return q.wrong_part ? `الغلط: «${q.wrong_part}» — الصح: «${q.correct_answer}»` : q.correct_answer;
+  if (type === "tf_fix") return q.model_answer ? `${q.correct_answer} — التصويب: ${q.model_answer}` : q.correct_answer;
+  return q.correct_answer;
+}
+
 export function gradeAttempt(att: Attempt, exam: Exam | undefined, live: Map<string, Question>): AttemptGrade {
   const items: QGrade[] = att.questions.map((sq) => {
     const max = sq.points;
     const manual = att.scores[sq.id];
     if (typeof manual === "number") return { id: sq.id, max, score: Math.min(max, Math.max(0, manual)), auto: false };
-    const key = live.get(sq.id)?.correct_answer;
-    if (exam?.grading === "auto" && sq.type === "choice" && key) {
-      const ans = (att.answers[sq.id] ?? "").trim();
-      return { id: sq.id, max, score: ans && ans === key.trim() ? max : 0, auto: true };
+    if (exam?.grading === "auto") {
+      const auto = autoScore(sq.type, att.answers[sq.id] ?? "", live.get(sq.id), max);
+      if (auto !== null) return { id: sq.id, max, score: auto, auto: true };
     }
     return { id: sq.id, max, score: null, auto: false };
   });
@@ -875,7 +910,7 @@ export async function myResults(userId: string): Promise<MyResult[]> {
               max: sq.points,
               score,
               verdict: verdictOf(score, sq.points),
-              feedback: score >= sq.points ? null : a.feedback[sq.id] || (g.items[i].auto ? live.get(sq.id)?.correct_answer ?? null : null),
+              feedback: score >= sq.points ? null : a.feedback[sq.id] || (g.items[i].auto ? autoFeedback(sq.type, live.get(sq.id)) : null),
             } satisfies MyResultItem;
           })
         : [],
@@ -1002,9 +1037,12 @@ export async function adminListQuestions(examId: string): Promise<Question[]> {
 function cleanQuestion(input: Partial<Question>): Omit<Question, "id" | "created_at" | "sort_order"> {
   const text = (input.text ?? "").trim();
   if (!text) throw new Error("نص السؤال مطلوب");
-  const type: QType = input.type === "short" || input.type === "long" ? input.type : "choice";
+  const type: QType = (["short", "long", "tf", "tf_fix", "fix"] as const).find((t) => t === input.type) ?? "choice";
   const options = type === "choice" ? (input.options ?? []).map((o) => o.trim()).filter(Boolean) : [];
   if (type === "choice" && options.length < 2) throw new Error("سؤال الاختيارات محتاج اختيارين على الأقل");
+  const wrongPart = type === "fix" ? (input.wrong_part ?? "").trim() || null : null;
+  if (type === "fix" && !wrongPart) throw new Error("حدد الكلمة أو الكلمتين الغلط اللي جوه نص السؤال");
+  if (type === "fix" && !text.includes(wrongPart!)) throw new Error("الكلمة الغلط لازم تكون مكتوبة بنفس الشكل جوه نص السؤال");
   return {
     exam_id: input.exam_id ?? "",
     kind: input.kind === "optional" ? "optional" : "core",
@@ -1015,8 +1053,18 @@ function cleanQuestion(input: Partial<Question>): Omit<Question, "id" | "created
     max_images: Math.min(10, Math.max(1, Math.floor(Number(input.max_images) || 3))),
     model_answer: input.model_answer?.trim() ? input.model_answer.trim() : null,
     points: cleanPoints(input.points),
-    correct_answer: type === "choice" && input.correct_answer && options.includes(input.correct_answer.trim()) ? input.correct_answer.trim() : null,
+    correct_answer: cleanCorrect(type, input.correct_answer, options),
+    wrong_part: wrongPart,
   };
+}
+
+function cleanCorrect(type: QType, v: string | null | undefined, options: string[]): string | null {
+  const c = (v ?? "").trim();
+  if (!c) return null;
+  if (type === "choice") return options.includes(c) ? c : null;
+  if (type === "tf" || type === "tf_fix") return c === TF_TRUE || c === TF_FALSE ? c : null;
+  if (type === "fix") return c.slice(0, 200);
+  return null;
 }
 
 function cleanPoints(v: unknown, fallback = 1): number {
@@ -1100,6 +1148,7 @@ export async function adminBulkAddQuestions(
         model_answer: null,
         points: 1,
         correct_answer: type === "choice" && correct && options.includes(correct) ? correct : null,
+        wrong_part: null,
         sort_order: ++order,
         created_at: new Date().toISOString(),
       });
@@ -1188,6 +1237,7 @@ export type AdminAttemptDetail = {
     model_answer: string | null;
     points: number;
     correct_answer: string | null;
+    wrong_part: string | null;
     score: number | null;
     auto: boolean; // الدرجة اتحسبت تلقائي
     feedback: string;
@@ -1219,6 +1269,7 @@ export async function adminGetAttempt(id: string): Promise<AdminAttemptDetail | 
       return {
         points: sq.points,
         correct_answer: live?.correct_answer ?? null,
+        wrong_part: live?.wrong_part ?? null,
         score: g.items[i].score,
         auto: g.items[i].auto,
         feedback: att.feedback[sq.id] ?? "",

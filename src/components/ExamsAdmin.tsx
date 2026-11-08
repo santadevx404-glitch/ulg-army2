@@ -11,6 +11,7 @@ import {
   adminAttemptsFn, adminAttemptFn, adminGradeAttemptFn, adminUnblockFn, adminRetakeFn, adminDeleteAttemptsFn,
 } from "@/lib/exam-fns";
 import { BypassPicker } from "@/components/BypassPicker";
+import { formatAnswer, parseTfFix } from "@/lib/answer-format";
 import type { AdminExam, AdminAttemptRow, Question, QType, QKind, ImageMode } from "@/lib/exams.server";
 import { Field, Modal } from "@/components/admin-ui";
 import { useMe } from "@/lib/use-me";
@@ -18,7 +19,7 @@ import { useMe } from "@/lib/use-me";
 const examsQuery = { queryKey: ["admin-exams"], queryFn: () => adminExamsFn() };
 const attemptsQuery = { queryKey: ["admin-attempts"], queryFn: () => adminAttemptsFn(), refetchInterval: 5000 };
 
-const typeLabel: Record<QType, string> = { choice: "اختيارات", short: "إجابة قصيرة", long: "إجابة طويلة" };
+const typeLabel: Record<QType, string> = { choice: "اختيارات", short: "إجابة قصيرة", long: "إجابة طويلة", tf: "صح أو خطأ", tf_fix: "صح أو خطأ مع التصويب", fix: "صحح المعلومة" };
 const statusLabel: Record<string, string> = {
   in_progress: "جارية", submitted: "مُسلَّمة", blocked: "محظور", unblocked: "اتفك حظره", retired: "سُمح بمحاولة جديدة",
 };
@@ -266,7 +267,8 @@ function QuestionsAdmin({ exam, onBack }: { exam: AdminExam; onBack: () => void 
           max_images: editing.max_images ?? 3,
           model_answer: editing.model_answer ?? null,
           points: editing.points ?? 1,
-          correct_answer: (editing.type ?? "choice") === "choice" ? (editing.correct_answer ?? null) : null,
+          correct_answer: ["choice", "tf", "tf_fix", "fix"].includes(editing.type ?? "choice") ? (editing.correct_answer ?? null) : null,
+          wrong_part: (editing.type ?? "choice") === "fix" ? (editing.wrong_part ?? null) : null,
         },
       });
     } catch (e: any) { return toast.error(e.message || "حدث خطأ"); }
@@ -343,7 +345,7 @@ function QuestionsAdmin({ exam, onBack }: { exam: AdminExam; onBack: () => void 
                 <span>{typeLabel[q.type]}</span>
                 {q.type === "choice" && <span>{q.options.length} اختيارات</span>}
                 <span>{q.points} درجة</span>
-                {q.type === "choice" && (q.correct_answer ? <span className="text-emerald-500">له إجابة صح</span> : exam.grading === "auto" ? <span className="text-destructive">من غير إجابة صح</span> : null)}
+                {q.type !== "short" && q.type !== "long" && (q.correct_answer ? <span className="text-emerald-500">له إجابة صح</span> : exam.grading === "auto" ? <span className="text-destructive">من غير إجابة صح</span> : null)}
                 {q.model_answer && <span>له إجابة نموذجية</span>}
                 {q.image_mode && q.image_mode !== "none" && <span className="text-[var(--gold)]">صورة {q.image_mode === "required" ? "إجبارية" : "اختيارية"} (حتى {q.max_images})</span>}
               </div>
@@ -368,10 +370,13 @@ function QuestionsAdmin({ exam, onBack }: { exam: AdminExam; onBack: () => void 
                 <option value="choice">اختيارات</option>
                 <option value="short">إجابة قصيرة</option>
                 <option value="long">إجابة طويلة</option>
+                <option value="tf">صح أو خطأ</option>
+                <option value="tf_fix">صح أو خطأ مع التصويب</option>
+                <option value="fix">صحح المعلومة</option>
               </select>
             </Field>
           </div>
-          <Field label="نص السؤال">
+          <Field label={(editing.type ?? "choice") === "fix" ? "الجملة (فيها المعلومة الغلط — الطالب هيحدد الكلمة الغلط بنفسه)" : (editing.type === "tf" || editing.type === "tf_fix") ? "العبارة" : "نص السؤال"}>
             <textarea className="input min-h-24" value={editing.text ?? ""} onChange={(e) => setEditing({ ...editing, text: e.target.value })} />
           </Field>
           {(editing.type ?? "choice") === "choice" && (
@@ -383,6 +388,15 @@ function QuestionsAdmin({ exam, onBack }: { exam: AdminExam; onBack: () => void 
             <Field label="درجة السؤال" hint="تتجمع كلها في الدرجة النهائية">
               <input type="number" min={0} step="any" className="input" dir="ltr" value={editing.points ?? 1} onChange={(e) => setEditing({ ...editing, points: e.target.value === "" ? undefined : Number(e.target.value) })} />
             </Field>
+            {(editing.type === "tf" || editing.type === "tf_fix") && (
+              <Field label="الإجابة الصح (للتصحيح التلقائي)">
+                <select className="input" value={editing.correct_answer ?? ""} onChange={(e) => setEditing({ ...editing, correct_answer: e.target.value || null })}>
+                  <option value="">— مفيش —</option>
+                  <option value="صح">صح</option>
+                  <option value="خطأ">خطأ</option>
+                </select>
+              </Field>
+            )}
             {(editing.type ?? "choice") === "choice" && (
               <Field label="الإجابة الصح (للتصحيح التلقائي)">
                 <select className="input" value={editing.correct_answer ?? ""} onChange={(e) => setEditing({ ...editing, correct_answer: e.target.value || null })}>
@@ -406,7 +420,17 @@ function QuestionsAdmin({ exam, onBack }: { exam: AdminExam; onBack: () => void 
               </Field>
             )}
           </div>
-          <Field label="إجابة نموذجية (اختياري — تظهر لك بس وقت المراجعة)">
+          {editing.type === "fix" && (
+            <div className="grid grid-cols-2 gap-4">
+              <Field label="الكلمة/الكلمتين الغلط (مكتوبة زي ما هي في الجملة)">
+                <input className="input" value={editing.wrong_part ?? ""} onChange={(e) => setEditing({ ...editing, wrong_part: e.target.value })} />
+              </Field>
+              <Field label="الصح اللي يتكتب مكانها" hint="لو الطالب حدد نفس الكلمة وكتب نفس الصح بتتصحح تلقائي (في التصحيح التلقائي)، وغير كدا بتصححها إنت">
+                <input className="input" value={editing.correct_answer ?? ""} onChange={(e) => setEditing({ ...editing, correct_answer: e.target.value || null })} />
+              </Field>
+            </div>
+          )}
+          <Field label={editing.type === "tf_fix" ? "التصويب الصحيح (لو الإجابة خطأ — بيظهر لك وقت التصحيح وللطالب لو غلط)" : "إجابة نموذجية (اختياري — تظهر لك بس وقت المراجعة)"}>
             <textarea className="input min-h-20" value={editing.model_answer ?? ""} onChange={(e) => setEditing({ ...editing, model_answer: e.target.value })} />
           </Field>
           <button onClick={save} className="btn-gold ripple inline-flex items-center gap-2"><Save className="h-4 w-4" />حفظ</button>
@@ -568,7 +592,7 @@ function AttemptModal({ id, canGrade, onClose }: { id: string; canGrade: boolean
       const v = scores[it.id];
       const sc = v === undefined || v === "" ? (it.score ?? 0) : Number(v);
       const autoOk = it.auto && v === undefined;
-      if (sc < it.points && !autoOk && !(fbs[it.id] ?? "").trim() && !(it.type === "choice" && it.auto && it.correct_answer)) {
+      if (sc < it.points && !autoOk && !(fbs[it.id] ?? "").trim() && !(it.auto && it.correct_answer)) {
         return toast.error(`اكتب الإجابة الصح للسؤال ${i + 1} (درجته أقل من الكاملة)`);
       }
     }
@@ -613,12 +637,12 @@ function AttemptModal({ id, canGrade, onClose }: { id: string; canGrade: boolean
                 </div>
                 <div className="text-xs text-muted-foreground mb-2">{typeLabel[it.type]}{it.kind ? ` • ${it.kind === "core" ? "أساسي" : "اختياري"}` : ""}{it.auto ? " • اتصحح تلقائي" : ""}</div>
                 <div className={`whitespace-pre-wrap rounded-md p-3 ${it.answer.trim() ? "bg-white/5" : "bg-destructive/10 text-destructive text-sm"}`}>
-                  {it.answer.trim() || (it.images.length ? "(من غير نص — في صور)" : "(من غير إجابة)")}
+                  {formatAnswer(it.type, it.answer) || (it.images.length ? "(من غير نص — في صور)" : "(من غير إجابة)")}
                 </div>
                 {gradable && (() => {
                   const v = scores[it.id];
                   const sc = v === undefined || v === "" ? (it.score ?? 0) : Number(v);
-                  const autoWrong = it.auto && it.type === "choice" && !!it.correct_answer;
+                  const autoWrong = it.auto && !!it.correct_answer;
                   if (sc >= it.points || autoWrong) return null;
                   return (
                     <div className="mt-3">
@@ -628,11 +652,17 @@ function AttemptModal({ id, canGrade, onClose }: { id: string; canGrade: boolean
                   );
                 })()}
                 {!gradable && it.feedback && <div className="mt-2 text-sm text-emerald-500 whitespace-pre-wrap">الإجابة الصح المكتوبة للطالب: {it.feedback}</div>}
-                {it.type === "choice" && it.correct_answer && (
-                  <div className={`mt-2 text-sm flex items-center gap-1 ${it.answer.trim() === it.correct_answer ? "text-emerald-500" : "text-destructive"}`}>
-                    {it.answer.trim() === it.correct_answer ? <CheckCircle2 className="h-4 w-4" /> : <XCircle className="h-4 w-4" />}
-                    الإجابة الصح: {it.correct_answer}
-                  </div>
+                {(it.type === "choice" || it.type === "tf" || it.type === "tf_fix") && it.correct_answer && (() => {
+                  const ok = (it.type === "tf_fix" ? parseTfFix(it.answer).verdict : it.answer.trim()) === it.correct_answer;
+                  return (
+                    <div className={`mt-2 text-sm flex items-center gap-1 ${ok ? "text-emerald-500" : "text-destructive"}`}>
+                      {ok ? <CheckCircle2 className="h-4 w-4" /> : <XCircle className="h-4 w-4" />}
+                      الإجابة الصح: {it.correct_answer}
+                    </div>
+                  );
+                })()}
+                {it.type === "fix" && it.correct_answer && (
+                  <div className="mt-2 text-sm text-[var(--gold)]">الغلط: «{it.wrong_part}» — الصح: «{it.correct_answer}»</div>
                 )}
                 {it.images.length > 0 && (
                   <div className="flex flex-wrap gap-3 mt-3">

@@ -5,6 +5,7 @@ import { motion } from "framer-motion";
 import { AlertTriangle, CheckCircle2, Clock, ImagePlus, Loader2, Lock, Send, ShieldAlert, Timer, X } from "lucide-react";
 import { publicExamFn, startExamFn, pollExamFn, saveAnswersFn, unlockExamFn } from "@/lib/exam-fns";
 import { useMe } from "@/lib/use-me";
+import { TF_FALSE, TF_TRUE, buildFix, buildTfFix, parseFix, parseTfFix } from "@/lib/answer-format";
 import type { PublicExamInfo, ServedQuestion, StartResult } from "@/lib/exams.server";
 
 export const Route = createFileRoute("/exams/$id")({
@@ -678,7 +679,7 @@ function QuestionCard({
     >
       <div className="flex gap-3 mb-4">
         <div className="h-7 w-7 shrink-0 rounded-full bg-[var(--gold)]/20 text-[var(--gold)] text-sm font-bold flex items-center justify-center">{index}</div>
-        <div className="font-semibold leading-loose whitespace-pre-wrap">{q.text}</div>
+        {q.type === "fix" ? <div className="font-semibold leading-loose text-[var(--gold)]">صحّح المعلومة الغلط في الجملة دي:</div> : <div className="font-semibold leading-loose whitespace-pre-wrap">{q.text}</div>}
       </div>
 
       {q.type === "choice" && (
@@ -700,6 +701,38 @@ function QuestionCard({
           })}
         </div>
       )}
+
+      {(q.type === "tf" || q.type === "tf_fix") && (() => {
+        const { verdict, fix } = parseTfFix(value);
+        const set = (v: string) => onChange(q.type === "tf" ? (verdict === v ? "" : v) : buildTfFix(verdict === v ? "" : v, v === TF_FALSE ? fix : ""));
+        return (
+          <div>
+            <div className="grid grid-cols-2 gap-3">
+              {[TF_TRUE, TF_FALSE].map((v) => {
+                const active = verdict === v;
+                return (
+                  <button
+                    type="button" key={v} onClick={() => set(v)}
+                    className={`px-4 py-3 rounded-lg border transition flex items-center justify-center gap-3 font-bold
+                      ${active ? "border-[var(--gold)] bg-[var(--gold)]/15" : "border-border hover:bg-white/5"}`}
+                  >
+                    <span className={`h-4 w-4 rounded-full border-2 shrink-0 ${active ? "border-[var(--gold)] bg-[var(--gold)]" : "border-muted-foreground"}`} />
+                    {v}
+                  </button>
+                );
+              })}
+            </div>
+            {q.type === "tf_fix" && verdict === TF_FALSE && (
+              <div className="mt-4">
+                <label className="text-sm text-muted-foreground mb-1 block">صوّب العبارة (اكتب الصح)</label>
+                <textarea className="input select-text min-h-24" value={fix} maxLength={2000} onChange={(e) => onChange(buildTfFix(TF_FALSE, e.target.value))} placeholder="اكتب التصويب" {...clip} />
+              </div>
+            )}
+          </div>
+        );
+      })()}
+
+      {q.type === "fix" && <FixAnswer text={q.text} value={value} onChange={onChange} clip={clip} />}
 
       {q.type === "short" && (
         <input className="input select-text" value={value} maxLength={500} onChange={(e) => onChange(e.target.value)} placeholder="اكتب إجابتك" {...clip} />
@@ -751,6 +784,69 @@ function QuestionCard({
               ))}
             </div>
           )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * "صحح المعلومة": الطالب يحدد كلمة أو كلمتين بالماوس/اللمس، يدوس X في الكيبورد (أو زرار التصويب)،
+ * وبعدها يكتب الصح مكانهم.
+ */
+function FixAnswer({ text, value, onChange, clip }: { text: string; value: string; onChange: (v: string) => void; clip: Record<string, unknown> }) {
+  const boxRef = useRef<HTMLDivElement>(null);
+  const toRef = useRef<HTMLInputElement>(null);
+  const cur = parseFix(value);
+  const [hint, setHint] = useState("");
+  const MAX_WORDS = 3;
+
+  const grab = () => {
+    const sel = window.getSelection();
+    const box = boxRef.current;
+    if (!sel || sel.rangeCount === 0 || !box) return setHint("حدد الكلمة الغلط الأول بالماوس أو بإصبعك");
+    const range = sel.getRangeAt(0);
+    if (!box.contains(range.commonAncestorContainer)) return setHint("حدد الكلمة من جوه الجملة");
+    const picked = sel.toString().replace(/\s+/g, " ").trim();
+    if (!picked) return setHint("حدد الكلمة الغلط الأول بالماوس أو بإصبعك");
+    if (picked.split(" ").length > MAX_WORDS) return setHint(`حدد كلمة أو كلمتين بس (حد أقصى ${MAX_WORDS})`);
+    setHint("");
+    sel.removeAllRanges();
+    onChange(buildFix(picked, cur?.from === picked ? cur.to : ""));
+    setTimeout(() => toRef.current?.focus(), 0);
+  };
+
+  // الجملة مع تظليل الجزء المختار (أول ظهور له)
+  const parts = (() => {
+    if (!cur?.from) return null;
+    const i = text.indexOf(cur.from);
+    return i < 0 ? null : [text.slice(0, i), text.slice(i, i + cur.from.length), text.slice(i + cur.from.length)];
+  })();
+
+  return (
+    <div>
+      <div
+        ref={boxRef}
+        tabIndex={0}
+        onKeyDown={(e) => { if (e.code === "KeyX" && !e.ctrlKey && !e.metaKey && !e.altKey) { e.preventDefault(); grab(); } }}
+        className="select-text rounded-lg border border-border bg-black/10 p-4 leading-loose text-lg whitespace-pre-wrap outline-none focus:border-[var(--gold)]/60"
+        {...clip}
+      >
+        {parts ? (<>{parts[0]}<mark className="rounded bg-destructive/25 text-destructive line-through px-0.5">{parts[1]}</mark>{parts[2]}</>) : text}
+      </div>
+      <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+        <span>حدد الكلمة (أو الكلمتين) الغلط ثم دوس <kbd className="px-1.5 py-0.5 rounded border border-border font-mono">X</kbd> في الكيبورد</span>
+        <button type="button" onClick={grab} className="px-3 py-1 rounded-md border border-border hover:border-[var(--gold)] text-foreground">تصويب المحدد</button>
+        {cur?.from && <button type="button" onClick={() => onChange("")} className="px-3 py-1 rounded-md border border-border hover:border-destructive">إلغاء التحديد</button>}
+      </div>
+      {hint && <div className="mt-2 text-sm text-destructive">{hint}</div>}
+      {cur?.from && (
+        <div className="mt-4">
+          <label className="text-sm text-muted-foreground mb-1 block">اكتب الصح مكان «<span className="text-destructive">{cur.from}</span>»</label>
+          <input
+            ref={toRef} className="input select-text" value={cur.to} maxLength={200}
+            onChange={(e) => onChange(buildFix(cur.from, e.target.value))} placeholder="الإجابة الصح" {...clip}
+          />
         </div>
       )}
     </div>

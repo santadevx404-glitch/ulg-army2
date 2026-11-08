@@ -17,8 +17,8 @@ export function useMe() {
   return {
     me,
     loading: q.isLoading,
-    can: (perm: string, scope?: Scope) => !!me && hasPerm(me.perms, me.owner, perm, scope),
-    canAny: (perm: string) => !!me && hasAnyPerm(me.perms, me.owner, perm),
-    canAnyAt: (perm: string, scope: Scope) => !!me && hasAnyPermAt(me.perms, me.owner, perm, scope),
+    can: (perm: string, scope?: Scope) => !!me && hasPerm(me.perms, me.full, perm, scope),
+    canAny: (perm: string) => !!me && hasAnyPerm(me.perms, me.full, perm),
+    canAnyAt: (perm: string, scope: Scope) => !!me && hasAnyPermAt(me.perms, me.full, perm, scope),
   };
 }
