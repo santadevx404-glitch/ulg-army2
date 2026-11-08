@@ -612,12 +612,16 @@ function terminalResult(att: Attempt, exam: Exam): SaveResult | null {
   return null;
 }
 
+/** أقصى فجوة بين نبضتين قبل ما نعتبر الطالب سابق الصفحة (النبض كل 4 ثواني). */
+const HEARTBEAT_GAP_MS = 30_000;
+
 /** حفظ تلقائي/نبض: بيحدّث الإجابات، ولو الوقت خلص بيسلّم أوتوماتيك. */
 export async function saveAnswers(
   attemptId: string,
   token: string,
   answers: Record<string, string>,
   final = false,
+  leftFlag = false, // المتصفح بلّغ إن الطالب سابقتا النافذة (تبديل تاب/برنامج) والبلاغ الأول ماوصلش
 ): Promise<SaveResult> {
   return withLock(async () => {
     const loaded = await loadAttemptForClient(attemptId, token);
@@ -640,6 +644,23 @@ export async function saveAnswers(
     }
 
     att.answers = sanitizeAnswers(att, answers);
+
+    // حماية التبديل: (1) بلاغ من المتصفح اتأخر/اتحجب، (2) انقطاع النبض (المتصفح بيبعت كل 4 ثواني)
+    // لفترة طويلة = الصفحة كانت متوقفة/مخفية أو البلاغ اتمنع. بنبلّغ الحظر في الحالتين لو الخيار شغال.
+    if (exam.block_on_tab_switch) {
+      const lastSeen = att.last_seen_at ? Date.parse(att.last_seen_at) : NaN;
+      const gap = Number.isFinite(lastSeen) ? now - lastSeen : 0;
+      if (leftFlag || gap > HEARTBEAT_GAP_MS) {
+        att.status = "blocked";
+        att.block_reason = "tab_switch";
+        att.blocked_at = nowIso;
+        att.block_code = makeBlockCode(new Set(attemptsDb.attempts.map((a) => a.block_code ?? "")));
+        att.last_saved_at = nowIso;
+        await writeAttemptsDb(attemptsDb);
+        return terminalResult(att, exam) ?? ({ state: "invalid" } as SaveResult);
+      }
+    }
+
     att.last_saved_at = nowIso;
     att.last_seen_at = nowIso;
 

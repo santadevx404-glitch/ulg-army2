@@ -13,6 +13,9 @@ export const Route = createFileRoute("/exams/$id")({
   component: ExamPage,
 });
 
+// نافذة اختيار الصورة بتخلّي المتصفح يفقد الفوكس — بنسمح بيها لحد 20 ثانية بس
+let pickerUntil = 0;
+
 type Started = Extract<StartResult, { state: "started" }>;
 
 type Phase =
@@ -369,6 +372,7 @@ function ExamRunner({
   const dirtyRef = useRef(false);
   const finishedRef = useRef(false); // السيرفر خلاص قفل المحاولة (تسليم/حظر) → مفيش beacon
   const leftRef = useRef(false); // اتبلّغ عن تبديل تاب
+  const leftPendingRef = useRef(false); // خروج من النافذة لسه السيرفر ماأكدش حظره
   const mountedRef = useRef(true);
   const offsetRef = useRef(new Date(data.server_now).getTime() - Date.now());
 
@@ -392,7 +396,13 @@ function ExamRunner({
   // نتائج أي نداء للسيرفر
   const handleServerState = useCallback((r: Awaited<ReturnType<typeof saveAnswersFn>>) => {
     if (r.state === "submitted") { finish(r.message); return true; }
-    if (r.state === "blocked") { finishedRef.current = true; onBlocked(r.code, r.message); return true; }
+    if (r.state === "blocked") {
+      finishedRef.current = true;
+      leftPendingRef.current = false;
+      try { localStorage.removeItem(`exam-left-${data.attemptId}`); } catch { /* ignore */ }
+      onBlocked(r.code, r.message);
+      return true;
+    }
     if (r.state === "invalid") { finishedRef.current = true; onDone("انتهت هذه المحاولة."); return true; }
     return false;
   }, [finish, onBlocked, onDone]);
@@ -400,7 +410,7 @@ function ExamRunner({
   const save = useCallback(async (final = false) => {
     dirtyRef.current = false;
     return saveAnswersFn({
-      data: { attemptId: data.attemptId, token: data.token, answers: answersRef.current, final },
+      data: { attemptId: data.attemptId, token: data.token, answers: answersRef.current, final, left: leftPendingRef.current },
     });
   }, [data.attemptId, data.token]);
 
@@ -443,6 +453,39 @@ function ExamRunner({
       }
     };
 
+    // أي خروج من النافذة بيتسجّل فورًا ومحليًا (حتى لو الشبكة واقعة أو البلاغ اتحجب)،
+    // وبيتبعت مع كل نبضة لحد ما السيرفر يأكد الحظر.
+    const storeKey = `exam-left-${data.attemptId}`;
+    try { if (localStorage.getItem(storeKey)) leftPendingRef.current = true; } catch { /* ignore */ }
+    const violation = () => {
+      if (!data.block_on_tab_switch || finishedRef.current) return;
+      leftRef.current = true;
+      if (!leftPendingRef.current) {
+        leftPendingRef.current = true;
+        try { localStorage.setItem(storeKey, String(Date.now())); } catch { /* ignore */ }
+        beacon("tab_switch");
+      }
+      // إعادة المحاولة فورًا من غير ما ننتظر النبضة الجاية
+      void save().then(handleServerState).catch(() => {});
+    };
+    let blurTimer: ReturnType<typeof setTimeout> | null = null;
+    const lostFocus = () => {
+      if (!data.block_on_tab_switch || finishedRef.current || blurTimer) return;
+      if (Date.now() < pickerUntil) return; // نافذة اختيار صورة مفتوحة
+      // مهلة صغيرة عشان وميض الفوكس العابر (مش تبديل حقيقي)
+      blurTimer = setTimeout(() => {
+        blurTimer = null;
+        if (finishedRef.current) return;
+        if (Date.now() < pickerUntil) return;
+        if (!document.hasFocus() || document.visibilityState === "hidden") violation();
+      }, 600);
+    };
+    const onFocus = () => { pickerUntil = 0; if (blurTimer) { clearTimeout(blurTimer); blurTimer = null; } };
+    // بعض المتصفحات/الأنظمة (نافذتين جنب بعض، شاشة تانية، تقسيم الشاشة) مبتبعتش blur — فبنفحص الفوكس باستمرار
+    const focusPoll = setInterval(() => { if (!document.hasFocus()) lostFocus(); }, 400);
+    window.addEventListener("blur", lostFocus);
+    window.addEventListener("focus", onFocus);
+
     const onPageHide = () => beacon("leave");
     const onBeforeUnload = (e: BeforeUnloadEvent) => {
       if (finishedRef.current) return;
@@ -452,8 +495,7 @@ function ExamRunner({
     const onVisibility = async () => {
       if (!data.block_on_tab_switch || finishedRef.current) return;
       if (document.visibilityState === "hidden") {
-        leftRef.current = true;
-        beacon("tab_switch");
+        violation();
       } else if (leftRef.current) {
         try { handleServerState(await save()); } catch { /* ignore */ }
       }
@@ -464,6 +506,10 @@ function ExamRunner({
     document.addEventListener("visibilitychange", onVisibility);
 
     return () => {
+      clearInterval(focusPoll);
+      if (blurTimer) clearTimeout(blurTimer);
+      window.removeEventListener("blur", lostFocus);
+      window.removeEventListener("focus", onFocus);
       window.removeEventListener("pagehide", onPageHide);
       window.removeEventListener("beforeunload", onBeforeUnload);
       document.removeEventListener("visibilitychange", onVisibility);
@@ -747,7 +793,7 @@ function QuestionCard({
           <div className="flex flex-wrap items-center gap-3">
             <button
               type="button"
-              onClick={() => fileRef.current?.click()}
+              onClick={() => { pickerUntil = Date.now() + 20_000; fileRef.current?.click(); }}
               disabled={busy || images.length >= q.max_images}
               className="px-3 py-1.5 rounded-md border border-border hover:border-[var(--gold)] text-sm inline-flex items-center gap-2 disabled:opacity-50"
             >
@@ -759,7 +805,7 @@ function QuestionCard({
               type="file"
               accept="image/jpeg,image/png,image/webp,image/gif"
               className="hidden"
-              onChange={(e) => { const f = e.target.files?.[0]; if (f) onAttach(f); e.target.value = ""; }}
+              onChange={(e) => { pickerUntil = 0; const f = e.target.files?.[0]; if (f) onAttach(f); e.target.value = ""; }}
             />
             <span className="text-xs text-muted-foreground">
               أو الصق صورة (Ctrl+V) بعد ما تضغط جوه السؤال • {images.length}/{q.max_images}
