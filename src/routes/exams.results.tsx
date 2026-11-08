@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import { ArrowRight, Award, CheckCircle2, ChevronDown, Hourglass, MinusCircle, XCircle } from "lucide-react";
 import { myExamResultsFn } from "@/lib/exam-fns";
-import { formatAnswer } from "@/lib/answer-format";
+import { applyFix, formatAnswer, parseFix } from "@/lib/answer-format";
 import { useMe } from "@/lib/use-me";
 import type { MyResult } from "@/lib/exams.server";
 
@@ -91,6 +91,9 @@ function ResultCard({ r }: { r: MyResult }) {
                     <span className="text-muted-foreground">إجابتك: </span>
                     <span className="whitespace-pre-wrap break-words">{formatAnswer(it.type, it.answer) || "— لم تُجب —"}</span>
                   </div>
+                  {it.type === "fix" && applyFix(it.text, parseFix(it.answer)) && (
+                    <div className="mt-1 text-sm"><span className="text-muted-foreground">الجملة بعد تعديلك: </span><span className="whitespace-pre-wrap">{applyFix(it.text, parseFix(it.answer))}</span></div>
+                  )}
                 </div>
                 <div className="text-sm font-bold shrink-0" dir="ltr">{num(it.score)} / {num(it.max)}</div>
               </div>

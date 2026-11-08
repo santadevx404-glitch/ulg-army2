@@ -1,11 +1,11 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { motion } from "framer-motion";
 import { AlertTriangle, CheckCircle2, Clock, ImagePlus, Loader2, Lock, Send, ShieldAlert, Timer, X } from "lucide-react";
 import { publicExamFn, startExamFn, pollExamFn, saveAnswersFn, unlockExamFn } from "@/lib/exam-fns";
 import { useMe } from "@/lib/use-me";
-import { TF_FALSE, TF_TRUE, buildFix, buildTfFix, parseFix, parseTfFix } from "@/lib/answer-format";
+import { TF_FALSE, TF_TRUE, buildFix, buildTfFix, parseFix, parseTfFix, tokenize, type FixEdit } from "@/lib/answer-format";
 import type { PublicExamInfo, ServedQuestion, StartResult } from "@/lib/exams.server";
 
 export const Route = createFileRoute("/exams/$id")({
@@ -725,7 +725,7 @@ function QuestionCard({
     >
       <div className="flex gap-3 mb-4">
         <div className="h-7 w-7 shrink-0 rounded-full bg-[var(--gold)]/20 text-[var(--gold)] text-sm font-bold flex items-center justify-center">{index}</div>
-        {q.type === "fix" ? <div className="font-semibold leading-loose text-[var(--gold)]">صحّح المعلومة الغلط في الجملة دي:</div> : <div className="font-semibold leading-loose whitespace-pre-wrap">{q.text}</div>}
+        {q.type === "fix" ? <div className="font-semibold leading-loose text-[var(--gold)]">علّم الكلمات أو الأسطر الغلط في الجملة دي وصحّحها:</div> : <div className="font-semibold leading-loose whitespace-pre-wrap">{q.text}</div>}
       </div>
 
       {q.type === "choice" && (
@@ -837,62 +837,127 @@ function QuestionCard({
 }
 
 /**
- * "صحح المعلومة": الطالب يحدد كلمة أو كلمتين بالماوس/اللمس، يدوس X في الكيبورد (أو زرار التصويب)،
- * وبعدها يكتب الصح مكانهم.
+ * "صحح المعلومة": الجملة بتتعرض ككلمات. الطالب يعلّم أي كلمات (حتى لو متباعدة) أو سطر كامل،
+ * بالضغط على الكلمة أو بالسحب بالماوس أو بدوس X وهو واقف على الكلمة، وبعدين يكتب البديل لكل جزء معلّم.
  */
 function FixAnswer({ text, value, onChange, clip }: { text: string; value: string; onChange: (v: string) => void; clip: Record<string, unknown> }) {
-  const boxRef = useRef<HTMLDivElement>(null);
-  const toRef = useRef<HTMLInputElement>(null);
-  const cur = parseFix(value);
-  const [hint, setHint] = useState("");
-  const MAX_WORDS = 3;
+  const toks = useMemo(() => tokenize(text), [text]);
+  const words = useMemo(() => toks.filter((t) => t.word), [toks]);
+  // سطر كل كلمة (عشان زرار "تعديل السطر")
+  const lines = useMemo(() => {
+    const out: { start: number; end: number }[] = [];
+    let line = -1, start = 0;
+    let fresh = true;
+    for (const t of toks) {
+      if (!t.word) { if (t.t.includes("\n")) fresh = true; continue; }
+      if (fresh) { if (line >= 0) out[line].end = t.idx - 1; line++; out[line] = { start: t.idx, end: t.idx }; fresh = false; start = t.idx; }
+      out[line].end = t.idx;
+    }
+    void start;
+    return out;
+  }, [toks]);
 
-  const grab = () => {
-    const sel = window.getSelection();
-    const box = boxRef.current;
-    if (!sel || sel.rangeCount === 0 || !box) return setHint("حدد الكلمة الغلط الأول بالماوس أو بإصبعك");
-    const range = sel.getRangeAt(0);
-    if (!box.contains(range.commonAncestorContainer)) return setHint("حدد الكلمة من جوه الجملة");
-    const picked = sel.toString().replace(/\s+/g, " ").trim();
-    if (!picked) return setHint("حدد الكلمة الغلط الأول بالماوس أو بإصبعك");
-    if (picked.split(" ").length > MAX_WORDS) return setHint(`حدد كلمة أو كلمتين بس (حد أقصى ${MAX_WORDS})`);
-    setHint("");
-    sel.removeAllRanges();
-    onChange(buildFix(picked, cur?.from === picked ? cur.to : ""));
-    setTimeout(() => toRef.current?.focus(), 0);
+  const edits = useMemo(() => parseFix(value).filter((e) => e.s >= 0), [value]);
+  const marked = useMemo(() => {
+    const m = new Set<number>();
+    for (const e of edits) for (let i = e.s; i <= e.e; i++) m.add(i);
+    return m;
+  }, [edits]);
+
+  const [drag, setDrag] = useState<null | { mode: boolean }>(null);
+  const hoverRef = useRef<number | null>(null);
+  const mouseRef = useRef(false);
+
+  // علّم/شيل مجموعة كلمات ثم أعد حساب الأجزاء المتصلة مع الحفاظ على البدائل المكتوبة
+  const setMarks = (idxs: number[], on: boolean) => {
+    const next = new Set(marked);
+    for (const i of idxs) (on ? next.add(i) : next.delete(i));
+    const sorted = [...next].sort((a, b) => a - b);
+    const runs: { s: number; e: number }[] = [];
+    for (const i of sorted) {
+      const last = runs[runs.length - 1];
+      if (last && i === last.e + 1) last.e = i; else runs.push({ s: i, e: i });
+    }
+    const merged: FixEdit[] = runs.map((r) => {
+      const old = edits.find((e) => e.s === r.s) ?? edits.find((e) => e.s >= r.s && e.e <= r.e);
+      return { s: r.s, e: r.e, from: words.slice(r.s, r.e + 1).map((w) => w.t).join(" "), to: old?.to ?? "" };
+    });
+    onChange(buildFix(merged));
   };
+  const toggle = (i: number) => setMarks([i], !marked.has(i));
+  const toggleLine = (l: { start: number; end: number }) => {
+    const idxs = Array.from({ length: l.end - l.start + 1 }, (_, k) => l.start + k);
+    setMarks(idxs, !idxs.every((i) => marked.has(i)));
+  };
+  const setTo = (s: number, to: string) => onChange(buildFix(edits.map((e) => (e.s === s ? { ...e, to } : e))));
 
-  // الجملة مع تظليل الجزء المختار (أول ظهور له)
-  const parts = (() => {
-    if (!cur?.from) return null;
-    const i = text.indexOf(cur.from);
-    return i < 0 ? null : [text.slice(0, i), text.slice(i, i + cur.from.length), text.slice(i + cur.from.length)];
-  })();
+  useEffect(() => {
+    const up = () => setDrag(null);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
+    return () => { window.removeEventListener("pointerup", up); window.removeEventListener("pointercancel", up); };
+  }, []);
+
+  const lineStarts = new Map(lines.map((l) => [l.start, l] as const));
 
   return (
     <div>
       <div
-        ref={boxRef}
         tabIndex={0}
-        onKeyDown={(e) => { if (e.code === "KeyX" && !e.ctrlKey && !e.metaKey && !e.altKey) { e.preventDefault(); grab(); } }}
-        className="select-text rounded-lg border border-border bg-black/10 p-4 leading-loose text-lg whitespace-pre-wrap outline-none focus:border-[var(--gold)]/60"
+        onKeyDown={(e) => {
+          if (e.code === "KeyX" && !e.ctrlKey && !e.metaKey && !e.altKey && hoverRef.current !== null) { e.preventDefault(); toggle(hoverRef.current); }
+        }}
+        className="rounded-lg border border-border bg-black/10 p-4 leading-[2.4] text-lg outline-none focus:border-[var(--gold)]/60 select-none"
         {...clip}
       >
-        {parts ? (<>{parts[0]}<mark className="rounded bg-destructive/25 text-destructive line-through px-0.5">{parts[1]}</mark>{parts[2]}</>) : text}
+        {toks.map((tk, k) => {
+          if (!tk.word) return tk.t.includes("\n") ? <br key={k} /> : <span key={k}>{" "}</span>;
+          const on = marked.has(tk.idx);
+          const ls = lineStarts.get(tk.idx);
+          return (
+            <span key={k}>
+              {ls && lines.length > 1 && (
+                <button
+                  type="button" title="علّم السطر كله" onClick={() => toggleLine(ls)}
+                  className="ml-2 align-middle text-[10px] px-1.5 py-0.5 rounded border border-border text-muted-foreground hover:border-[var(--gold)] hover:text-[var(--gold)]"
+                >سطر</button>
+              )}
+              <span
+                role="button"
+                onPointerDown={(e) => {
+                  if (e.pointerType !== "mouse") return;
+                  mouseRef.current = true;
+                  const mode = !on;
+                  setDrag({ mode });
+                  setMarks([tk.idx], mode);
+                }}
+                onPointerEnter={(e) => {
+                  hoverRef.current = tk.idx;
+                  if (drag && e.pointerType === "mouse") setMarks([tk.idx], drag.mode);
+                }}
+                onPointerLeave={() => { if (hoverRef.current === tk.idx) hoverRef.current = null; }}
+                onClick={() => { if (mouseRef.current) { mouseRef.current = false; return; } toggle(tk.idx); }}
+                className={`cursor-pointer rounded px-0.5 transition ${on ? "bg-destructive/25 text-destructive line-through" : "hover:bg-[var(--gold)]/20"}`}
+              >{tk.t}</span>
+            </span>
+          );
+        })}
       </div>
-      <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
-        <span>حدد الكلمة (أو الكلمتين) الغلط ثم دوس <kbd className="px-1.5 py-0.5 rounded border border-border font-mono">X</kbd> في الكيبورد</span>
-        <button type="button" onClick={grab} className="px-3 py-1 rounded-md border border-border hover:border-[var(--gold)] text-foreground">تصويب المحدد</button>
-        {cur?.from && <button type="button" onClick={() => onChange("")} className="px-3 py-1 rounded-md border border-border hover:border-destructive">إلغاء التحديد</button>}
+      <div className="mt-2 text-xs text-muted-foreground leading-loose">
+        اضغط على أي كلمة غلط (أو اسحب على كذا كلمة، أو وإنت واقف على الكلمة دوس <kbd className="px-1.5 py-0.5 rounded border border-border font-mono">X</kbd>) — تقدر تعلّم كلمات متباعدة أو سطر كامل، وبعدها اكتب البديل لكل جزء.
+        {marked.size > 0 && <button type="button" onClick={() => onChange("")} className="mr-3 px-2 py-0.5 rounded border border-border hover:border-destructive text-foreground">إلغاء كل التعليم</button>}
       </div>
-      {hint && <div className="mt-2 text-sm text-destructive">{hint}</div>}
-      {cur?.from && (
-        <div className="mt-4">
-          <label className="text-sm text-muted-foreground mb-1 block">اكتب الصح مكان «<span className="text-destructive">{cur.from}</span>»</label>
-          <input
-            ref={toRef} className="input select-text" value={cur.to} maxLength={200}
-            onChange={(e) => onChange(buildFix(cur.from, e.target.value))} placeholder="الإجابة الصح" {...clip}
-          />
+      {edits.length > 0 && (
+        <div className="mt-4 space-y-3">
+          {edits.map((e, n) => (
+            <div key={e.s} className="rounded-lg border border-border p-3">
+              <div className="text-sm text-muted-foreground mb-1">{n + 1}) اكتب الصح مكان «<span className="text-destructive">{e.from}</span>»</div>
+              <textarea
+                className="input select-text min-h-12" rows={e.e - e.s > 6 ? 3 : 1} value={e.to} maxLength={1000}
+                onChange={(ev) => setTo(e.s, ev.target.value)} placeholder="الصح (سيبه فاضي لو الجزء ده يتحذف)" {...clip}
+              />
+            </div>
+          ))}
         </div>
       )}
     </div>

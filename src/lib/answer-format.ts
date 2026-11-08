@@ -18,14 +18,51 @@ export function buildTfFix(verdict: string, fix: string): string {
   return verdict === TF_FALSE && fix ? `${verdict}\n${fix}` : verdict;
 }
 
-export function parseFix(a: string): { from: string; to: string } | null {
+// ---- "صحح المعلومة": الطالب يعلّم كلمات/أجزاء/أسطر في الجملة (حتى لو متباعدة) ويكتب بديل لكل جزء ----
+//  الإجابة: JSON {"edits":[{"s":3,"e":4,"from":"الكلمتين الغلط","to":"الصح"}]}
+//  s/e = ترتيب أول وآخر كلمة (من 0) في الجملة.
+
+export type FixEdit = { s: number; e: number; from: string; to: string };
+
+export type Tok = { t: string; word: boolean; idx: number };
+/** تقسيم الجملة لكلمات ومسافات (الكلمات بس هي اللي بتتعلّم). */
+export function tokenize(text: string): Tok[] {
+  let idx = 0;
+  return (text ?? "").split(/(\s+)/).filter((t) => t !== "").map((t) => (/^\s+$/.test(t) ? { t, word: false, idx: -1 } : { t, word: true, idx: idx++ }));
+}
+
+export function parseFix(a: string): FixEdit[] {
   try {
     const o = JSON.parse(a);
-    if (o && typeof o.from === "string") return { from: o.from, to: typeof o.to === "string" ? o.to : "" };
+    if (o && Array.isArray(o.edits)) {
+      return o.edits
+        .filter((e: any) => e && typeof e.from === "string" && Number.isInteger(e.s) && Number.isInteger(e.e))
+        .map((e: any) => ({ s: e.s, e: e.e, from: e.from, to: typeof e.to === "string" ? e.to : "" }));
+    }
+    // شكل قديم: تعديل واحد
+    if (o && typeof o.from === "string") return [{ s: -1, e: -1, from: o.from, to: typeof o.to === "string" ? o.to : "" }];
   } catch { /* ignore */ }
-  return null;
+  return [];
 }
-export const buildFix = (from: string, to: string) => (from ? JSON.stringify({ from, to }) : "");
+export const buildFix = (edits: FixEdit[]) => (edits.length ? JSON.stringify({ edits: edits.map((e) => ({ s: e.s, e: e.e, from: e.from, to: e.to })) }) : "");
+
+/** الجملة بعد تطبيق التعديلات (الأجزاء المعدّلة بين « »). */
+export function applyFix(text: string, edits: FixEdit[]): string {
+  const ranged = edits.filter((e) => e.s >= 0);
+  if (!ranged.length) return "";
+  let out = "";
+  let skipUntil = -1;
+  let pendingWs = "";
+  for (const tk of tokenize(text)) {
+    if (!tk.word) { pendingWs += tk.t; continue; }
+    if (tk.idx <= skipUntil) { pendingWs = ""; continue; } // مسافات داخل الجزء المعدّل بتتشال
+    const ed = ranged.find((e) => e.s === tk.idx);
+    out += pendingWs;
+    pendingWs = "";
+    if (ed) { out += `«${ed.to.trim() || "…"}»`; skipUntil = ed.e; } else out += tk.t;
+  }
+  return out;
+}
 
 /** نص مقروء للإجابة (للأدمن وللطالب في النتائج). */
 export function formatAnswer(type: string, a: string): string {
@@ -36,8 +73,8 @@ export function formatAnswer(type: string, a: string): string {
     return fix ? `${verdict} — التصويب: ${fix}` : verdict;
   }
   if (type === "fix") {
-    const f = parseFix(s);
-    return f ? `غيّر «${f.from}» إلى «${f.to || "…"}»` : s;
+    const edits = parseFix(s);
+    return edits.length ? edits.map((e) => `«${e.from}» ← «${e.to || "…"}»`).join("\n") : s;
   }
   return s;
 }

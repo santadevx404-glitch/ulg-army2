@@ -11,7 +11,7 @@ import {
   adminAttemptsFn, adminAttemptFn, adminGradeAttemptFn, adminUnblockFn, adminRetakeFn, adminDeleteAttemptsFn,
 } from "@/lib/exam-fns";
 import { BypassPicker } from "@/components/BypassPicker";
-import { formatAnswer, parseTfFix } from "@/lib/answer-format";
+import { applyFix, formatAnswer, parseFix, parseTfFix } from "@/lib/answer-format";
 import type { AdminExam, AdminAttemptRow, Question, QType, QKind, ImageMode } from "@/lib/exams.server";
 import { Field, Modal } from "@/components/admin-ui";
 import { useMe } from "@/lib/use-me";
@@ -422,10 +422,10 @@ function QuestionsAdmin({ exam, onBack }: { exam: AdminExam; onBack: () => void 
           </div>
           {editing.type === "fix" && (
             <div className="grid grid-cols-2 gap-4">
-              <Field label="الكلمة/الكلمتين الغلط (مكتوبة زي ما هي في الجملة)">
+              <Field label="الكلمة الغلط (اختياري — مكتوبة زي ما هي في الجملة)">
                 <input className="input" value={editing.wrong_part ?? ""} onChange={(e) => setEditing({ ...editing, wrong_part: e.target.value })} />
               </Field>
-              <Field label="الصح اللي يتكتب مكانها" hint="لو الطالب حدد نفس الكلمة وكتب نفس الصح بتتصحح تلقائي (في التصحيح التلقائي)، وغير كدا بتصححها إنت">
+              <Field label="الصح اللي يتكتب مكانها (اختياري)" hint="الطالب بيعلّم كلمات أو أسطر زي ما يحب ويكتب البديل. لو كتبتهم الاتنين وطابقهم بتعديل واحد بالظبط بيتصحح تلقائي (في التصحيح التلقائي)، وغير كدا بتصححه إنت.">
                 <input className="input" value={editing.correct_answer ?? ""} onChange={(e) => setEditing({ ...editing, correct_answer: e.target.value || null })} />
               </Field>
             </div>
@@ -661,8 +661,11 @@ function AttemptModal({ id, canGrade, onClose }: { id: string; canGrade: boolean
                     </div>
                   );
                 })()}
+                {it.type === "fix" && applyFix(it.text, parseFix(it.answer)) && (
+                  <div className="mt-2 text-sm rounded-md bg-white/5 p-3"><span className="text-muted-foreground">الجملة بعد تعديل الطالب: </span><span className="whitespace-pre-wrap">{applyFix(it.text, parseFix(it.answer))}</span></div>
+                )}
                 {it.type === "fix" && it.correct_answer && (
-                  <div className="mt-2 text-sm text-[var(--gold)]">الغلط: «{it.wrong_part}» — الصح: «{it.correct_answer}»</div>
+                  <div className="mt-2 text-sm text-[var(--gold)]">{it.wrong_part ? `الغلط: «${it.wrong_part}» — ` : ""}الصح: «{it.correct_answer}»</div>
                 )}
                 {it.images.length > 0 && (
                   <div className="flex flex-wrap gap-3 mt-3">

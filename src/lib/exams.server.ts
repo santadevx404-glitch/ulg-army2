@@ -780,6 +780,13 @@ const round2 = (n: number) => Math.round(n * 100) / 100;
 function autoScore(type: QType, rawAnswer: string, q: Question | undefined, max: number): number | null {
   const key = q?.correct_answer?.trim();
   const ans = (rawAnswer ?? "").trim();
+  if (type === "fix") {
+    const edits = parseFix(ans).filter((e) => e.from.trim());
+    if (!edits.length) return 0; // معدّلش حاجة
+    // لو الأدمن حدد الغلط والصح ومطابقهم بالظبط (تعديل واحد) = كاملة، غير كدا يدوي
+    if (key && q?.wrong_part && edits.length === 1 && normText(edits[0].from) === normText(q.wrong_part) && normText(edits[0].to) === normText(key)) return max;
+    return null;
+  }
   if (!key) return null;
   if (type === "choice" || type === "tf") return ans && ans === key ? max : 0;
   if (type === "tf_fix") {
@@ -787,19 +794,13 @@ function autoScore(type: QType, rawAnswer: string, q: Question | undefined, max:
     if (!verdict || verdict !== key) return 0;
     return key === TF_TRUE ? max : null;
   }
-  if (type === "fix") {
-    const f = parseFix(ans);
-    if (!f || !f.from.trim()) return 0;
-    if (q?.wrong_part && normText(f.from) === normText(q.wrong_part) && normText(f.to) === normText(key)) return max;
-    return null;
-  }
   return null;
 }
 
 /** نص "الإجابة الصح" اللي بيظهر للطالب لما التصحيح يبقى تلقائي ومش كامل. */
 function autoFeedback(type: QType, q: Question | undefined): string | null {
+  if (type === "fix") return q?.correct_answer ? (q.wrong_part ? `الغلط: «${q.wrong_part}» — الصح: «${q.correct_answer}»` : q.correct_answer) : null;
   if (!q?.correct_answer) return null;
-  if (type === "fix") return q.wrong_part ? `الغلط: «${q.wrong_part}» — الصح: «${q.correct_answer}»` : q.correct_answer;
   if (type === "tf_fix") return q.model_answer ? `${q.correct_answer} — التصويب: ${q.model_answer}` : q.correct_answer;
   return q.correct_answer;
 }
@@ -1061,9 +1062,9 @@ function cleanQuestion(input: Partial<Question>): Omit<Question, "id" | "created
   const type: QType = (["short", "long", "tf", "tf_fix", "fix"] as const).find((t) => t === input.type) ?? "choice";
   const options = type === "choice" ? (input.options ?? []).map((o) => o.trim()).filter(Boolean) : [];
   if (type === "choice" && options.length < 2) throw new Error("سؤال الاختيارات محتاج اختيارين على الأقل");
+  // صحح المعلومة: الغلط والصح اختياريين (للتصحيح التلقائي بس) — الطالب بيعلّم اللي يعجبه
   const wrongPart = type === "fix" ? (input.wrong_part ?? "").trim() || null : null;
-  if (type === "fix" && !wrongPart) throw new Error("حدد الكلمة أو الكلمتين الغلط اللي جوه نص السؤال");
-  if (type === "fix" && !text.includes(wrongPart!)) throw new Error("الكلمة الغلط لازم تكون مكتوبة بنفس الشكل جوه نص السؤال");
+  if (wrongPart && !text.includes(wrongPart)) throw new Error("الكلمة الغلط لازم تكون مكتوبة بنفس الشكل جوه نص السؤال");
   return {
     exam_id: input.exam_id ?? "",
     kind: input.kind === "optional" ? "optional" : "core",
