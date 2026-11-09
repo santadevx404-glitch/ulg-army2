@@ -5,7 +5,7 @@ import { motion } from "framer-motion";
 import { AlertTriangle, CheckCircle2, Clock, ImagePlus, Loader2, Lock, Send, ShieldAlert, Timer, X } from "lucide-react";
 import { publicExamFn, startExamFn, pollExamFn, saveAnswersFn, unlockExamFn } from "@/lib/exam-fns";
 import { useMe } from "@/lib/use-me";
-import { TF_FALSE, TF_TRUE, buildFix, buildTfFix, parseFix, parseTfFix, tokenize, type FixEdit } from "@/lib/answer-format";
+import { NO_ERRORS, TF_FALSE, TF_TRUE, buildFix, buildNone, isNoErrors, buildTfFix, parseFix, parseTfFix, tokenize, type FixEdit } from "@/lib/answer-format";
 import type { PublicExamInfo, ServedQuestion, StartResult } from "@/lib/exams.server";
 
 export const Route = createFileRoute("/exams/$id")({
@@ -857,6 +857,7 @@ function FixAnswer({ text, value, onChange, clip }: { text: string; value: strin
     return out;
   }, [toks]);
 
+  const none = isNoErrors(value);
   const edits = useMemo(() => parseFix(value).filter((e) => e.s >= 0), [value]);
   const marked = useMemo(() => {
     const m = new Set<number>();
@@ -913,6 +914,7 @@ function FixAnswer({ text, value, onChange, clip }: { text: string; value: strin
         {toks.map((tk, k) => {
           if (!tk.word) return tk.t.includes("\n") ? <br key={k} /> : <span key={k}>{" "}</span>;
           const on = marked.has(tk.idx);
+          const ok = none; // "لا يوجد أخطاء" = الكلام كله أخضر
           const ls = lineStarts.get(tk.idx);
           return (
             <span key={k}>
@@ -937,7 +939,7 @@ function FixAnswer({ text, value, onChange, clip }: { text: string; value: strin
                 }}
                 onPointerLeave={() => { if (hoverRef.current === tk.idx) hoverRef.current = null; }}
                 onClick={() => { if (mouseRef.current) { mouseRef.current = false; return; } toggle(tk.idx); }}
-                className={`cursor-pointer rounded px-0.5 transition ${on ? "bg-destructive/25 text-destructive line-through" : "hover:bg-[var(--gold)]/20"}`}
+                className={`cursor-pointer rounded px-0.5 transition ${ok ? "bg-emerald-500/20 text-emerald-500" : on ? "bg-destructive/25 text-destructive line-through" : "hover:bg-[var(--gold)]/20"}`}
               >{tk.t}</span>
             </span>
           );
@@ -947,6 +949,13 @@ function FixAnswer({ text, value, onChange, clip }: { text: string; value: strin
         اضغط على أي كلمة غلط (أو اسحب على كذا كلمة، أو وإنت واقف على الكلمة دوس <kbd className="px-1.5 py-0.5 rounded border border-border font-mono">X</kbd>) — تقدر تعلّم كلمات متباعدة أو سطر كامل، وبعدها اكتب البديل لكل جزء.
         {marked.size > 0 && <button type="button" onClick={() => onChange("")} className="mr-3 px-2 py-0.5 rounded border border-border hover:border-destructive text-foreground">إلغاء كل التعليم</button>}
       </div>
+      <button
+        type="button"
+        onClick={() => onChange(none ? "" : buildNone())}
+        className={`mt-3 w-full sm:w-auto px-5 py-2.5 rounded-lg border font-bold transition ${none ? "border-emerald-500 bg-emerald-500/20 text-emerald-500" : "border-border hover:border-emerald-500/60"}`}
+      >
+        {none ? "✓ " : ""}{NO_ERRORS}
+      </button>
       {edits.length > 0 && (
         <div className="mt-4 space-y-3">
           {edits.map((e, n) => (

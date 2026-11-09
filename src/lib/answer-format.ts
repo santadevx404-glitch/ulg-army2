@@ -22,6 +22,13 @@ export function buildTfFix(verdict: string, fix: string): string {
 //  الإجابة: JSON {"edits":[{"s":3,"e":4,"from":"الكلمتين الغلط","to":"الصح"}]}
 //  s/e = ترتيب أول وآخر كلمة (من 0) في الجملة.
 
+/** إجابة "لا يوجد أخطاء" (الجملة صح) — بتتخزن كـ {"none":true}، وبتتحط كمان كـ correct_answer للسؤال اللي جملته صحيحة. */
+export const NO_ERRORS = "لا يوجد أخطاء";
+export const buildNone = () => JSON.stringify({ none: true });
+export function isNoErrors(a: string): boolean {
+  try { return JSON.parse(a)?.none === true; } catch { return false; }
+}
+
 export type FixEdit = { s: number; e: number; from: string; to: string };
 
 export type Tok = { t: string; word: boolean; idx: number };
@@ -73,6 +80,7 @@ export function formatAnswer(type: string, a: string): string {
     return fix ? `${verdict} — التصويب: ${fix}` : verdict;
   }
   if (type === "fix") {
+    if (isNoErrors(s)) return NO_ERRORS;
     const edits = parseFix(s);
     return edits.length ? edits.map((e) => `«${e.from}» ← «${e.to || "…"}»`).join("\n") : s;
   }

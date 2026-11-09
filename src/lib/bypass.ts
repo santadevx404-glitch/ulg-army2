@@ -3,7 +3,8 @@
 
 export type Bypass = { user_ids: string[]; rank_ids: string[] };
 /** الزائر الحالي (null = مش مسجل دخول). */
-export type Viewer = { id: string; owner: boolean; rank_ids: string[] } | null;
+/** owner = عنده صلاحية "الدخول من غير كلمة سر لأي حاجة" · super = صاحب الموقع/الصلاحيات الكاملة (بيعدّي على الأقسام والعناصر بس، مش الاختبارات). */
+export type Viewer = { id: string; owner: boolean; super?: boolean; rank_ids: string[] } | null;
 
 /** بينضّف القيمة الجاية من التخزين/العميل. بيرجع null لو مفيش حد مستثنى. */
 export function normBypass(b: unknown): Bypass | null {
@@ -16,6 +17,14 @@ export function normBypass(b: unknown): Bypass | null {
 
 /** هل الزائر ده يدخل من غير كلمة سر؟ صاحب الموقع دايمًا، وبعده المستثنين بالاسم أو بالرتبة. */
 export function bypasses(viewer: Viewer, b: Bypass | null | undefined): boolean {
+  if (!viewer) return false;
+  if (viewer.owner || viewer.super) return true;
+  if (!b) return false;
+  return b.user_ids.includes(viewer.id) || b.rank_ids.some((r) => viewer.rank_ids.includes(r));
+}
+
+/** الاختبارات: كلمة السر/الشفرة بتتطلب حتى من صاحب الموقع والصلاحيات الكاملة — إلا لو مستثنيين بالاسم/الرتبة أو معاهم صلاحية "من غير كلمة سر" الصريحة. */
+export function bypassesExam(viewer: Viewer, b: Bypass | null | undefined): boolean {
   if (!viewer) return false;
   if (viewer.owner) return true;
   if (!b) return false;

@@ -10,7 +10,7 @@ export async function getViewer(): Promise<Viewer> {
     if (!uid) return null;
     const a = await actorFromUserId(uid);
     if (!a) return null;
-    return { id: a.user.id, owner: a.full || a.perms.has("bypass_all"), rank_ids: a.user.rank_ids ?? [] };
+    return { id: a.user.id, owner: a.perms.has("bypass_all"), super: a.full, rank_ids: a.user.rank_ids ?? [] };
   } catch {
     return null;
   }

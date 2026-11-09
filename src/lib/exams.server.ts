@@ -7,10 +7,10 @@
 //    بيحصل عند أي طلب بعد انتهاء الوقت، فمش معتمد على المتصفح.
 //  - الشخص بيتعرّف بأول حقل في "بيانات الدخول" (مثلاً اسم الحساب).
 import crypto from "node:crypto";
-import { TF_FALSE, TF_TRUE, normText, parseFix, parseTfFix } from "./answer-format";
+import { NO_ERRORS, TF_FALSE, TF_TRUE, isNoErrors, normText, parseFix, parseTfFix } from "./answer-format";
 import { kvGetJSON, kvSetJSON, makeLock } from "./kv-store.server";
 import { signValue, verifySigned } from "./local-auth.server";
-import { bypasses, normBypass, type Bypass, type Viewer } from "./bypass";
+import { bypassesExam, normBypass, type Bypass, type Viewer } from "./bypass";
 import { MAX_IMAGE_BYTES, deleteExamImages, detectImageExt, saveExamImage } from "./exam-images.server";
 
 const EXAMS_KEY = "bwd:exams";
@@ -276,7 +276,7 @@ export async function listPublicExams(viewer: Viewer = null): Promise<PublicExam
   const now = Date.now();
   return db.exams
     // المشفّر مبيظهرش غير للمستثنين من كلمة سره
-    .filter((e) => e.published && (e.access !== "hidden" || bypasses(viewer, e.bypass)))
+    .filter((e) => e.published && (e.access !== "hidden" || bypassesExam(viewer, e.bypass)))
     .sort((a, b) => b.created_at.localeCompare(a.created_at))
     .map((e) => {
       const end = timeMs(e.ends_at);
@@ -287,7 +287,7 @@ export async function listPublicExams(viewer: Viewer = null): Promise<PublicExam
         ends_at: e.ends_at,
         attempt_minutes: e.attempt_minutes,
         closed: end !== null && now >= end,
-        locked: e.access === "locked" && !bypasses(viewer, e.bypass),
+        locked: e.access === "locked" && !bypassesExam(viewer, e.bypass),
       };
     });
 }
@@ -334,7 +334,7 @@ export async function getPublicExam(id: string, token?: string | null, viewer: V
   if (!exam.published) return { state: "gate", id, title: null };
   if (await tokenOk(exam.id, token)) return { state: "ok", info: toPublic(exam) };
   // مستثنى من كلمة السر: بندّيه توكن الدخول مباشرة
-  if (bypasses(viewer, exam.bypass)) return { state: "ok", info: toPublic(exam), token: await signValue(ACCESS_PURPOSE, exam.id, ACCESS_TTL) };
+  if (bypassesExam(viewer, exam.bypass)) return { state: "ok", info: toPublic(exam), token: await signValue(ACCESS_PURPOSE, exam.id, ACCESS_TTL) };
   return { state: "gate", id, title: exam.access === "locked" ? exam.title : null };
 }
 
@@ -781,8 +781,11 @@ function autoScore(type: QType, rawAnswer: string, q: Question | undefined, max:
   const key = q?.correct_answer?.trim();
   const ans = (rawAnswer ?? "").trim();
   if (type === "fix") {
+    const noneKey = key === NO_ERRORS; // الجملة صحيحة أصلًا
+    if (isNoErrors(ans)) return noneKey ? max : key || q?.wrong_part ? 0 : null;
     const edits = parseFix(ans).filter((e) => e.from.trim());
     if (!edits.length) return 0; // معدّلش حاجة
+    if (noneKey) return 0; // عدّل جملة صحيحة
     // لو الأدمن حدد الغلط والصح ومطابقهم بالظبط (تعديل واحد) = كاملة، غير كدا يدوي
     if (key && q?.wrong_part && edits.length === 1 && normText(edits[0].from) === normText(q.wrong_part) && normText(edits[0].to) === normText(key)) return max;
     return null;
@@ -799,6 +802,7 @@ function autoScore(type: QType, rawAnswer: string, q: Question | undefined, max:
 
 /** نص "الإجابة الصح" اللي بيظهر للطالب لما التصحيح يبقى تلقائي ومش كامل. */
 function autoFeedback(type: QType, q: Question | undefined): string | null {
+  if (type === "fix" && q?.correct_answer === NO_ERRORS) return "الجملة صحيحة — لا يوجد أخطاء";
   if (type === "fix") return q?.correct_answer ? (q.wrong_part ? `الغلط: «${q.wrong_part}» — الصح: «${q.correct_answer}»` : q.correct_answer) : null;
   if (!q?.correct_answer) return null;
   if (type === "tf_fix") return q.model_answer ? `${q.correct_answer} — التصويب: ${q.model_answer}` : q.correct_answer;

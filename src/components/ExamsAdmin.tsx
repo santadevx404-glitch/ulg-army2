@@ -11,7 +11,7 @@ import {
   adminAttemptsFn, adminAttemptFn, adminGradeAttemptFn, adminUnblockFn, adminRetakeFn, adminDeleteAttemptsFn,
 } from "@/lib/exam-fns";
 import { BypassPicker } from "@/components/BypassPicker";
-import { applyFix, formatAnswer, parseFix, parseTfFix } from "@/lib/answer-format";
+import { NO_ERRORS, formatAnswer, parseTfFix } from "@/lib/answer-format";
 import type { AdminExam, AdminAttemptRow, Question, QType, QKind, ImageMode } from "@/lib/exams.server";
 import { Field, Modal } from "@/components/admin-ui";
 import { useMe } from "@/lib/use-me";
@@ -421,6 +421,15 @@ function QuestionsAdmin({ exam, onBack }: { exam: AdminExam; onBack: () => void 
             )}
           </div>
           {editing.type === "fix" && (
+            <label className="flex items-center gap-2 text-sm cursor-pointer">
+              <input
+                type="checkbox" checked={editing.correct_answer === NO_ERRORS}
+                onChange={(e) => setEditing({ ...editing, correct_answer: e.target.checked ? NO_ERRORS : null, wrong_part: e.target.checked ? null : editing.wrong_part })}
+              />
+              الجملة صحيحة ومفيهاش أخطاء (الإجابة الصح هي زرار "لا يوجد أخطاء")
+            </label>
+          )}
+          {editing.type === "fix" && editing.correct_answer !== NO_ERRORS && (
             <div className="grid grid-cols-2 gap-4">
               <Field label="الكلمة الغلط (اختياري — مكتوبة زي ما هي في الجملة)">
                 <input className="input" value={editing.wrong_part ?? ""} onChange={(e) => setEditing({ ...editing, wrong_part: e.target.value })} />
@@ -661,11 +670,8 @@ function AttemptModal({ id, canGrade, onClose }: { id: string; canGrade: boolean
                     </div>
                   );
                 })()}
-                {it.type === "fix" && applyFix(it.text, parseFix(it.answer)) && (
-                  <div className="mt-2 text-sm rounded-md bg-white/5 p-3"><span className="text-muted-foreground">الجملة بعد تعديل الطالب: </span><span className="whitespace-pre-wrap">{applyFix(it.text, parseFix(it.answer))}</span></div>
-                )}
                 {it.type === "fix" && it.correct_answer && (
-                  <div className="mt-2 text-sm text-[var(--gold)]">{it.wrong_part ? `الغلط: «${it.wrong_part}» — ` : ""}الصح: «{it.correct_answer}»</div>
+                  <div className="mt-2 text-sm text-[var(--gold)]">{it.correct_answer === NO_ERRORS ? "الجملة صحيحة — لا يوجد أخطاء" : `${it.wrong_part ? `الغلط: «${it.wrong_part}» — ` : ""}الصح: «${it.correct_answer}»`}</div>
                 )}
                 {it.images.length > 0 && (
                   <div className="flex flex-wrap gap-3 mt-3">
