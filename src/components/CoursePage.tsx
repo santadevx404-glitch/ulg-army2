@@ -32,7 +32,7 @@ export function CoursePage({ item, slug, password }: { item: CourseItem; slug: s
   const [activeId, setActiveId] = useState<string | null>(null); // null = نظرة عامة
   const [resumeId, setResumeId] = useState<string | null>(null);
   const [focus, setFocus] = useState(false); // وضع القراءة
-  const [fontIdx, setFontIdx] = useState(1);
+  const [fontIdx, setFontIdx] = useState(2);
   const [menuOpen, setMenuOpen] = useState(false); // قايمة المواضيع على الموبايل
   const [lightbox, setLightbox] = useState<{ url: string; caption: string } | null>(null);
 
@@ -122,7 +122,7 @@ export function CoursePage({ item, slug, password }: { item: CourseItem; slug: s
   );
 
   return (
-    <div className={`mx-auto p-4 md:p-8 ${focus ? "max-w-3xl" : "max-w-6xl"}`}>
+    <div className={`mx-auto p-3 md:p-6 ${focus ? "max-w-5xl" : "max-w-[120rem]"}`}>
       <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
         <Link to="/s/$slug" params={{ slug }} className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-[var(--gold)]">
           <ArrowRight className="h-4 w-4" />العودة إلى {item.sections?.name}
@@ -147,7 +147,7 @@ export function CoursePage({ item, slug, password }: { item: CourseItem; slug: s
         </div>
       </div>
 
-      <div className={focus ? "" : "lg:grid lg:grid-cols-[18rem_minmax(0,1fr)] lg:gap-8 lg:items-start"}>
+      <div className={focus ? "" : "lg:grid lg:grid-cols-[16rem_minmax(0,1fr)] lg:gap-6 lg:items-start"}>
         {/* القايمة الجانبية (كمبيوتر) */}
         {!focus && (
           <aside className="hidden lg:block mil-card p-3 sticky top-6 max-h-[calc(100vh-3rem)] overflow-y-auto">
@@ -191,18 +191,18 @@ export function CoursePage({ item, slug, password }: { item: CourseItem; slug: s
             <AnimatePresence mode="wait">
               <motion.article
                 key={active.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
-                className="mil-card p-6 md:p-8"
+                className="mil-card p-5 md:p-8 lg:p-10"
               >
                 <div className="text-xs text-muted-foreground mb-2">
                   {active.unit ? `${active.unit} • ` : ""}الموضوع {index + 1} من {topics.length}
                 </div>
                 <h1 className="text-2xl md:text-3xl font-black gold-text mb-6">{index + 1}. {active.title}</h1>
                 {active.images && active.images.length > 0 && (
-                  <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-6">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4 mb-8">
                     {active.images.map((img, i) => (
                       <button key={img.url + i} type="button" onClick={() => setLightbox(img)} className="rounded-lg overflow-hidden text-right">
-                        <div className="aspect-square overflow-hidden"><img src={img.url} alt={img.caption} className="w-full h-full object-cover" loading="lazy" /></div>
-                        {img.caption && <div className="text-xs text-muted-foreground mt-1 truncate">{img.caption}</div>}
+                        <div className="aspect-[4/3] overflow-hidden rounded-lg"><img src={img.url} alt={img.caption} className="w-full h-full object-cover" loading="lazy" /></div>
+                        {img.caption && <div className="text-sm text-muted-foreground mt-1.5">{img.caption}</div>}
                       </button>
                     ))}
                   </div>

@@ -17,6 +17,7 @@ import { PerformanceModeProvider, usePerformanceMode } from "@/lib/performance-m
 import { useContentProtection } from "@/lib/content-protection";
 import { ThemeProvider, THEME_INIT_SCRIPT, useTheme } from "@/lib/theme";
 import { Sidebar } from "@/components/Sidebar";
+import { useSidebarCollapsed } from "@/lib/sidebar-state";
 import { AnimatedBackground } from "@/components/AnimatedBackground";
 import { Footer } from "@/components/Footer";
 import { AnnouncementBar } from "@/components/AnnouncementCard";
@@ -109,11 +110,12 @@ function RootContent() {
   const { lite } = usePerformanceMode();
   const { theme } = useTheme();
   useContentProtection();
+  const collapsed = useSidebarCollapsed();
   return (
     <MotionConfig reducedMotion={lite ? "always" : "user"}>
       <AnimatedBackground />
       <Sidebar />
-      <main className="lg:mr-72 min-h-screen relative z-10 flex flex-col">
+      <main className={`${collapsed ? "lg:mr-16" : "lg:mr-72"} transition-[margin] duration-300 min-h-screen relative z-10 flex flex-col`}>
         <div className="flex-1">
           <AnnouncementBar />
           <Outlet />
