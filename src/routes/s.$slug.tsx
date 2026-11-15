@@ -1,4 +1,4 @@
-import { createFileRoute, Link, notFound, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Link, notFound, Outlet, useChildMatches, useNavigate } from "@tanstack/react-router";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
 import { useState } from "react";
@@ -41,6 +41,7 @@ export const Route = createFileRoute("/s/$slug")({
 function SectionPage() {
   const { slug } = Route.useParams();
   const navigate = useNavigate();
+  const hasChild = useChildMatches().length > 0; // /s/$slug/$id (صفحة الدورة)
   const { data } = useSuspenseQuery(sectionBySlugQuery(slug));
   const { section, items: fetchedItems } = data;
   const [openId, setOpenId] = useState<string | null>(null);
@@ -51,6 +52,8 @@ function SectionPage() {
   const isLocked = !!section?.locked && !unlockedItems;
   const items = unlockedItems ?? fetchedItems;
   const openItem = items.find((i) => i.id === openId);
+
+  if (hasChild) return <Outlet />;
 
   return (
     <div className="p-6 md:p-10 max-w-7xl mx-auto">
