@@ -6,6 +6,7 @@ import { ArrowRight, X } from "lucide-react";
 import { itemByIdQuery } from "@/lib/queries";
 import { FormattedText } from "@/lib/formatted-text";
 import { MiniPasswordGate } from "@/components/MiniPasswordGate";
+import { CoursePage } from "@/components/CoursePage";
 
 export const Route = createFileRoute("/s/$slug/$id")({
   loader: async ({ params, context }) => {
@@ -60,6 +61,8 @@ function ItemPage() {
   }
 
   const item = result;
+  // النظام الجديد للدورات: صفحة كاملة بقايمة مواضيع جانبية
+  if (item.use_topics && item.course_view === "page") return <CoursePage item={item} slug={slug} password={password} />;
   const galleryImages = item.gallery;
 
   return (

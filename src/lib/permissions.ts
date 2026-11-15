@@ -39,7 +39,7 @@ export const ITEM_FIELDS: FieldGroup[] = [
   { id: "gallery", label: "معرض الصور", fields: ["gallery"] },
   { id: "published", label: "النشر والإخفاء", fields: ["published"] },
   { id: "order", label: "الترتيب", fields: ["sort_order"] },
-  { id: "topics_mode", label: "تفعيل نظام المواضيع", fields: ["use_topics"] },
+  { id: "topics_mode", label: "تفعيل نظام المواضيع وطريقة عرض الدورة", fields: ["use_topics", "course_view"] },
   { id: "password", label: "كلمة سر العنصر والمستثنين منها", fields: ["password", "bypass"] },
   { id: "section", label: "نقل لقسم تاني", fields: ["section_id"] },
 ];
@@ -49,6 +49,7 @@ export const TOPIC_FIELDS: FieldGroup[] = [
   { id: "content", label: "المحتوى", fields: ["content"] },
   { id: "images", label: "الصور", fields: ["images"] },
   { id: "order", label: "الترتيب", fields: ["sort_order"] },
+  { id: "unit", label: "الوحدة", fields: ["unit"] },
 ];
 
 export const EXAM_SETTINGS_FIELDS: FieldGroup[] = [

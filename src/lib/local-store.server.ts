@@ -33,6 +33,7 @@ export type Item = {
   published: boolean;
   sort_order: number;
   use_topics: boolean;
+  course_view: "classic" | "page"; // classic = نافذة منبثقة (النظام القديم) | page = صفحة كاملة بقايمة مواضيع جانبية
   password: string | null;
   bypass: Bypass | null;
   created_at: string;
@@ -51,6 +52,7 @@ export type Topic = {
   title: string;
   content: string;
   images: GalleryImage[];
+  unit: string | null; // اسم الوحدة (المواضيع بنفس الاسم بتتجمّع في النظام الجديد)
   sort_order: number;
 };
 
@@ -82,8 +84,8 @@ async function readDb(): Promise<DB> {
   const parsed = await kvGetJSON<Partial<DB>>(DB_KEY, DEFAULT_DB);
   return {
     sections: (parsed.sections ?? []).map((s) => ({ password: null, ...s, bypass: normBypass(s.bypass) })),
-    items: (parsed.items ?? []).map((i) => ({ password: null, ...i, bypass: normBypass(i.bypass), gallery: normalizeGallery(i.gallery) })),
-    topics: (parsed.topics ?? []).map((t) => ({ ...t, images: normalizeGallery((t as any).images) })),
+    items: (parsed.items ?? []).map((i) => ({ password: null, ...i, course_view: (i as Item).course_view === "page" ? "page" : "classic", bypass: normBypass(i.bypass), gallery: normalizeGallery(i.gallery) }) as Item),
+    topics: (parsed.topics ?? []).map((t) => ({ ...t, unit: (t as Topic).unit?.trim() || null, images: normalizeGallery((t as any).images) })),
   };
 }
 
@@ -231,6 +233,7 @@ export async function saveItem(payload: Partial<Item>): Promise<Item> {
       published: payload.published ?? true,
       sort_order: payload.sort_order ?? 0,
       use_topics: payload.use_topics ?? false,
+      course_view: payload.course_view === "page" ? "page" : "classic",
       password: payload.password?.trim() ? payload.password.trim() : null,
       bypass: normBypass(payload.bypass),
       created_at: now,
@@ -282,7 +285,7 @@ export async function saveTopic(payload: Partial<Topic>): Promise<Topic> {
     if (payload.id) {
       const idx = db.topics.findIndex((t) => t.id === payload.id);
       if (idx === -1) throw new Error("الموضوع غير موجود");
-      db.topics[idx] = { ...db.topics[idx], ...payload } as Topic;
+      db.topics[idx] = { ...db.topics[idx], ...payload, ...("unit" in payload ? { unit: payload.unit?.trim() ? payload.unit.trim().slice(0, 80) : null } : {}) } as Topic;
       await writeDb(db);
       return db.topics[idx];
     }
@@ -292,6 +295,7 @@ export async function saveTopic(payload: Partial<Topic>): Promise<Topic> {
       title: payload.title ?? "",
       content: payload.content ?? "",
       images: payload.images ?? [],
+      unit: payload.unit?.trim() ? payload.unit.trim().slice(0, 80) : null,
       sort_order: payload.sort_order ?? 0,
     };
     db.topics.push(topic);

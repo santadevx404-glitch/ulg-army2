@@ -1,4 +1,4 @@
-import { createFileRoute, Link, notFound } from "@tanstack/react-router";
+import { createFileRoute, Link, notFound, useNavigate } from "@tanstack/react-router";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
 import { useState } from "react";
@@ -40,6 +40,7 @@ export const Route = createFileRoute("/s/$slug")({
 
 function SectionPage() {
   const { slug } = Route.useParams();
+  const navigate = useNavigate();
   const { data } = useSuspenseQuery(sectionBySlugQuery(slug));
   const { section, items: fetchedItems } = data;
   const [openId, setOpenId] = useState<string | null>(null);
@@ -78,7 +79,7 @@ function SectionPage() {
             >
               <button
                 type="button"
-                onClick={() => setOpenId(it.id)}
+                onClick={() => (it.use_topics && it.course_view === "page" ? navigate({ to: "/s/$slug/$id", params: { slug, id: it.id } }) : setOpenId(it.id))}
                 className="mil-card block group h-full w-full text-right"
               >
                 {it.cover_image && (

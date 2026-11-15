@@ -227,6 +227,7 @@ function ItemsAdmin() {
       published: editing.published ?? true,
       sort_order: editing.sort_order ?? 0,
       use_topics: editing.use_topics ?? false,
+      course_view: editing.course_view === "page" ? "page" : "classic",
       password: editing.password?.trim() ? editing.password.trim() : null,
       bypass: editing.password?.trim() ? (editing.bypass ?? null) : null,
     };
@@ -356,6 +357,14 @@ function ItemsAdmin() {
               عرضه كقائمة مواضيع منسدلة (بدل صفحة التفاصيل العادية)
             </label>
           </div>
+          {editing.use_topics && (
+            <Field label="طريقة عرض الدورة" locked={lk("topics_mode")}>
+              <select className="input" value={editing.course_view ?? "classic"} onChange={(e) => setEditing({ ...editing, course_view: e.target.value as "classic" | "page" })}>
+                <option value="classic">النظام القديم — نافذة منبثقة بمواضيع منسدلة</option>
+                <option value="page">النظام الجديد — صفحة كاملة بقايمة جانبية وترقيم ووحدات وسابق/تالي ووضع قراءة</option>
+              </select>
+            </Field>
+          )}
 
           <Field label="كلمة سر العنصر (اختياري — سيبها فاضية لإلغاء القفل)" locked={lk("password")}>
             <input className="input" dir="ltr" type="text" value={editing.password || ""} onChange={(e) => setEditing({ ...editing, password: e.target.value })} placeholder="مثال: 1234" />
@@ -425,6 +434,7 @@ function TopicsEditor({ itemId, sectionId }: { itemId: string; sectionId?: strin
           title: editingTopic.title,
           content: editingTopic.content || "",
           images: editingTopic.images ?? [],
+          unit: editingTopic.unit?.trim() || null,
           sort_order: editingTopic.sort_order ?? topics.length + 1,
         },
       });
@@ -468,6 +478,9 @@ function TopicsEditor({ itemId, sectionId }: { itemId: string; sectionId?: strin
         <Modal onClose={() => setEditingTopic(null)} title={editingTopic.id ? "تعديل موضوع" : "موضوع جديد"}>
           <Field label="عنوان الموضوع" locked={tl("title")}>
             <input className="input" value={editingTopic.title || ""} onChange={(e) => setEditingTopic({ ...editingTopic, title: e.target.value })} />
+          </Field>
+          <Field label="الوحدة (اختياري — المواضيع اللي ليها نفس اسم الوحدة بتتجمّع تحت عنوانها في النظام الجديد)" locked={tl("unit")}>
+            <input className="input" value={editingTopic.unit || ""} onChange={(e) => setEditingTopic({ ...editingTopic, unit: e.target.value })} placeholder="مثال: الوحدة الأولى — الأساسيات" />
           </Field>
           <Field label="المحتوى" locked={tl("content")}>
             <textarea
