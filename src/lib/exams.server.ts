@@ -59,6 +59,9 @@ export type Exam = {
   attempt_minutes: number | null; // التايمر الشخصي (من لحظة فتح الاختبار)
   ends_at: string | null; // التايمر العام (ISO)
   block_on_tab_switch: boolean; // يحظر لو الشخص بدّل التاب
+  exam_view: "classic" | "new"; // شكل شاشة الاختبار: classic = القديم | new = سؤال واحد وشريط أرقام
+  exam_layout: "one" | "all"; // (الجديد) سؤال سؤال أو كل الأسئلة في صفحة
+  allow_back: boolean; // (الجديد) السماح بالرجوع للأسئلة السابقة
   intro_message: string; // نص يظهر قبل البدء (اختياري)
   submit_message: string; // رسالة بعد التسليم
   timeout_message: string; // رسالة انتهاء الوقت (لو فاضية بتظهر رسالة التسليم)
@@ -134,6 +137,9 @@ function normalizeExam(e: Partial<Exam>): Exam {
     attempt_minutes: e.attempt_minutes ?? null,
     ends_at: e.ends_at ?? null,
     block_on_tab_switch: e.block_on_tab_switch ?? false,
+    exam_view: e.exam_view === "new" ? "new" : "classic",
+    exam_layout: e.exam_layout === "all" ? "all" : "one",
+    allow_back: e.allow_back ?? true,
     intro_message: e.intro_message ?? "",
     submit_message: e.submit_message ?? "تم استلام إجاباتك.",
     timeout_message: e.timeout_message ?? "",
@@ -268,11 +274,14 @@ export type PublicExam = {
   attempt_minutes: number | null;
   closed: boolean;
   locked: boolean; // محتاج كلمة سر (الاسم ظاهر)
+  mine: { status: "in_progress" | "submitted" | "blocked"; total: number | null; max: number } | null; // حالة المستخدم الحالي
 };
 
 /** القايمة العامة: المنشور بس، والمشفّر (hidden) مبيظهرش خالص. */
 export async function listPublicExams(viewer: Viewer = null): Promise<PublicExam[]> {
   const db = await readExamsDb();
+  const att = viewer?.id ? (await readAttemptsDb()).attempts.filter((a) => a.user_id === viewer.id) : [];
+  const live = new Map(db.questions.map((q) => [q.id, q]));
   const now = Date.now();
   return db.exams
     // المشفّر مبيظهرش غير للمستثنين من كلمة سره
@@ -288,11 +297,31 @@ export async function listPublicExams(viewer: Viewer = null): Promise<PublicExam
         attempt_minutes: e.attempt_minutes,
         closed: end !== null && now >= end,
         locked: e.access === "locked" && !bypassesExam(viewer, e.bypass),
+        mine: mineOf(e, viewer?.id ?? null, att, live),
       };
     });
 }
 
-export type PublicExamInfo = PublicExam & { fields: string[]; intro_message: string };
+/** حالة المستخدم في اختبار: آخر محاولة له ودرجتها (لو اتصححت/اتنزّلت له) */
+function mineOf(e: Exam, userId: string | null, atts: Attempt[], live: Map<string, Question>): PublicExam["mine"] {
+  if (!userId) return null;
+  const mine = atts.filter((a) => a.exam_id === e.id && a.user_id === userId).sort((a, b) => b.started_at.localeCompare(a.started_at));
+  const a = mine[0];
+  if (!a) return null;
+  if (a.status === "in_progress") return { status: "in_progress", total: null, max: 0 };
+  if (a.status === "blocked") return { status: "blocked", total: null, max: 0 };
+  const g = gradeAttempt(a, e, live);
+  const released = isReleased(a, g);
+  return { status: "submitted", total: released ? g.total : null, max: g.max };
+}
+
+export type PublicExamInfo = PublicExam & {
+  fields: string[];
+  intro_message: string;
+  question_count: number; // عدد الأسئلة اللي الشخص هيشوفها
+  max_points: number; // الدرجة الكلية التقريبية
+  exam_view: "classic" | "new";
+};
 
 export type PublicExamResult =
   | { state: "ok"; info: PublicExamInfo; token?: string } // token: للمستثنين من كلمة السر (بيتولّد من غير كلمة)
@@ -306,9 +335,17 @@ async function tokenOk(examId: string, token?: string | null): Promise<boolean> 
   return (await verifySigned(ACCESS_PURPOSE, token)) === examId;
 }
 
-function toPublic(e: Exam): PublicExamInfo {
+function toPublic(e: Exam, qs: Question[] = []): PublicExamInfo {
   const end = timeMs(e.ends_at);
+  const core = qs.filter((q) => q.kind === "core");
+  const pool = qs.filter((q) => q.kind === "optional");
+  const take = Math.min(Math.max(0, e.optional_count), pool.length);
+  const avg = pool.length ? pool.reduce((s, q) => s + q.points, 0) / pool.length : 0;
   return {
+    mine: null,
+    question_count: core.length + take,
+    max_points: Math.round((core.reduce((s, q) => s + q.points, 0) + avg * take) * 100) / 100,
+    exam_view: e.exam_view,
     id: e.id,
     title: e.title,
     description: e.description,
@@ -330,11 +367,11 @@ export async function getPublicExam(id: string, token?: string | null, viewer: V
   const db = await readExamsDb();
   const exam = db.exams.find((e) => e.id === id);
   if (!exam) return { state: "gate", id, title: null };
-  if (exam.access === "open") return exam.published ? { state: "ok", info: toPublic(exam) } : { state: "unavailable" };
+  if (exam.access === "open") return exam.published ? { state: "ok", info: toPublic(exam, db.questions.filter((q) => q.exam_id === exam.id)) } : { state: "unavailable" };
   if (!exam.published) return { state: "gate", id, title: null };
-  if (await tokenOk(exam.id, token)) return { state: "ok", info: toPublic(exam) };
+  if (await tokenOk(exam.id, token)) return { state: "ok", info: toPublic(exam, db.questions.filter((q) => q.exam_id === exam.id)) };
   // مستثنى من كلمة السر: بندّيه توكن الدخول مباشرة
-  if (bypassesExam(viewer, exam.bypass)) return { state: "ok", info: toPublic(exam), token: await signValue(ACCESS_PURPOSE, exam.id, ACCESS_TTL) };
+  if (bypassesExam(viewer, exam.bypass)) return { state: "ok", info: toPublic(exam, db.questions.filter((q) => q.exam_id === exam.id)), token: await signValue(ACCESS_PURPOSE, exam.id, ACCESS_TTL) };
   return { state: "gate", id, title: exam.access === "locked" ? exam.title : null };
 }
 
@@ -413,6 +450,9 @@ export type StartResult =
       server_now: string;
       block_on_tab_switch: boolean;
       title: string;
+      view: "classic" | "new";
+      layout: "one" | "all";
+      allow_back: boolean;
     };
 
 /** المستخدم المسجّل اللي بيدخل الاختبار — بياناته بتتاخد من حسابه تلقائي. */
@@ -554,6 +594,9 @@ export async function startExam(examId: string, user: ExamUser, accessToken?: st
       server_now: startedAt.toISOString(),
       block_on_tab_switch: exam.block_on_tab_switch,
       title: exam.title,
+      view: exam.exam_view,
+      layout: exam.exam_layout,
+      allow_back: exam.allow_back,
     } satisfies StartResult;
   });
 }
@@ -895,6 +938,7 @@ export type MyResult = {
   attempt_id: string;
   exam_id: string;
   exam_title: string;
+  view: "classic" | "new";
   attempt_no: number;
   submitted_at: string | null;
   graded: boolean;
@@ -919,6 +963,7 @@ export async function myResults(userId: string): Promise<MyResult[]> {
       attempt_id: a.id,
       exam_id: a.exam_id,
       exam_title: exam?.title ?? "(اختبار محذوف)",
+      view: exam?.exam_view ?? "classic",
       attempt_no: a.attempt_no,
       submitted_at: a.submitted_at,
       graded: released,

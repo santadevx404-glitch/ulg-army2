@@ -58,6 +58,7 @@ export const EXAM_SETTINGS_FIELDS: FieldGroup[] = [
   { id: "grading", label: "طريقة التصحيح (يدوي / تلقائي)", fields: ["grading"] },
   { id: "limits", label: "الأسئلة الاختيارية والمدة وتاريخ الانتهاء", fields: ["optional_count", "attempt_minutes", "ends_at"] },
   { id: "options", label: "الترتيب العشوائي وحظر تبديل التاب", fields: ["shuffle", "block_on_tab_switch"] },
+  { id: "exam_view", label: "شكل شاشة الاختبار (قديم/جديد)", fields: ["exam_view", "exam_layout", "allow_back"] },
   { id: "publish", label: "النشر والإخفاء", fields: ["published"] },
   { id: "messages", label: "رسائل التسليم والوقت والحظر والانتهاء", fields: ["submit_message", "timeout_message", "block_message", "closed_message"] },
   { id: "access", label: "نوع الاختبار وكلمة السر والمستثنين منها", fields: ["access", "password", "bypass"] },

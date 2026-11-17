@@ -73,6 +73,9 @@ export function ExamsAdmin() {
           attempt_minutes: editing.attempt_minutes ? Number(editing.attempt_minutes) : null,
           ends_at: editing.ends_at ?? null,
           block_on_tab_switch: editing.block_on_tab_switch ?? false,
+          exam_view: editing.exam_view ?? "classic",
+          exam_layout: editing.exam_layout ?? "one",
+          allow_back: editing.allow_back ?? true,
           intro_message: editing.intro_message ?? "",
           submit_message: editing.submit_message ?? "",
           timeout_message: editing.timeout_message ?? "",
@@ -183,6 +186,26 @@ export function ExamsAdmin() {
             <label className="flex items-center gap-2"><input type="checkbox" disabled={lk("publish")} checked={editing.published ?? false} onChange={(e) => setEditing({ ...editing, published: e.target.checked })} />منشور</label>
             <label className="flex items-center gap-2"><input type="checkbox" disabled={lk("options")} checked={editing.shuffle ?? true} onChange={(e) => setEditing({ ...editing, shuffle: e.target.checked })} />ترتيب الأسئلة والاختيارات عشوائي</label>
             <label className="flex items-center gap-2"><input type="checkbox" disabled={lk("options")} checked={editing.block_on_tab_switch ?? false} onChange={(e) => setEditing({ ...editing, block_on_tab_switch: e.target.checked })} />حظر لو بدّل التاب</label>
+          </div>
+
+          <div className="rounded-lg border border-border p-4 mb-4">
+            <Field label="شكل شاشة الاختبار" locked={lk("exam_view")} hint="الجديد: سؤال واحد في الشاشة + شريط أرقام + تعليم للمراجعة + حفظ تلقائي. القديم: كل الأسئلة تحت بعض.">
+              <select className="input" value={editing.exam_view ?? "classic"} onChange={(e) => setEditing({ ...editing, exam_view: e.target.value as "classic" | "new" })}>
+                <option value="classic">القديم — كل الأسئلة في صفحة واحدة</option>
+                <option value="new">الجديد — شريط أرقام ومراجعة</option>
+              </select>
+            </Field>
+            {(editing.exam_view ?? "classic") === "new" && (
+              <div className="grid md:grid-cols-2 gap-4">
+                <Field label="طريقة العرض (في الجديد)" locked={lk("exam_view")}>
+                  <select className="input" value={editing.exam_layout ?? "one"} onChange={(e) => setEditing({ ...editing, exam_layout: e.target.value as "one" | "all" })}>
+                    <option value="one">سؤال سؤال</option>
+                    <option value="all">كل الأسئلة في صفحة (مع شريط الأرقام)</option>
+                  </select>
+                </Field>
+                <label className="flex items-center gap-2 mt-7"><input type="checkbox" disabled={lk("exam_view")} checked={editing.allow_back ?? true} onChange={(e) => setEditing({ ...editing, allow_back: e.target.checked })} />السماح بالرجوع للأسئلة السابقة (سؤال سؤال)</label>
+              </div>
+            )}
           </div>
 
           <div className="rounded-lg border border-border p-4 mb-4">

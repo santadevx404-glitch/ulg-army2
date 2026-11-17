@@ -2,7 +2,7 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { motion } from "framer-motion";
-import { AlertTriangle, CheckCircle2, Clock, ImagePlus, Loader2, Lock, Send, ShieldAlert, Timer, X } from "lucide-react";
+import { AlertTriangle, CheckCircle2, ChevronLeft, ChevronRight, Clock, Flag, HelpCircle, ImagePlus, ListChecks, Loader2, Lock, Send, ShieldAlert, Timer, X } from "lucide-react";
 import { publicExamFn, startExamFn, pollExamFn, saveAnswersFn, unlockExamFn } from "@/lib/exam-fns";
 import { useMe } from "@/lib/use-me";
 import { NO_ERRORS, TF_FALSE, TF_TRUE, buildFix, buildNone, isNoErrors, buildTfFix, parseFix, parseTfFix, tokenize, type FixEdit } from "@/lib/answer-format";
@@ -172,6 +172,20 @@ function ExamPage() {
             {info!.intro_message}
           </div>
         )}
+
+        <div className="grid grid-cols-3 gap-3 mb-6 text-center">
+          {[
+            { icon: ListChecks, label: "عدد الأسئلة", value: info!.question_count > 0 ? String(info!.question_count) : "—" },
+            { icon: Timer, label: "المدة", value: info!.attempt_minutes ? `${info!.attempt_minutes} دقيقة` : "مفتوحة" },
+            { icon: HelpCircle, label: "الدرجة الكلية", value: info!.max_points > 0 ? String(info!.max_points) : "—" },
+          ].map((s) => (
+            <div key={s.label} className="rounded-xl border border-border bg-card/70 p-4">
+              <s.icon className="h-5 w-5 text-[var(--gold)] mx-auto mb-1.5" />
+              <div className="text-lg font-black">{s.value}</div>
+              <div className="text-xs text-muted-foreground">{s.label}</div>
+            </div>
+          ))}
+        </div>
 
         <div className="rounded-xl border border-[var(--gold)]/40 bg-[var(--gold)]/10 p-4 mb-6 text-sm leading-loose">
           <div className="flex items-center gap-2 font-bold text-[var(--gold)] mb-1">
@@ -367,6 +381,16 @@ function ExamRunner({
   const [notice, setNotice] = useState("");
   const [submitError, setSubmitError] = useState("");
   const activeQidRef = useRef<string | null>(null);
+  // ---- الشكل الجديد ----
+  const isNew = data.view === "new";
+  const oneAtATime = isNew && data.layout !== "all";
+  const [cur, setCur] = useState(0);
+  const [lastSaved, setLastSaved] = useState<number | null>(null);
+  const [saveFailed, setSaveFailed] = useState(false);
+  const flagKey = `exam-flags-${data.attemptId}`;
+  const [flags, setFlags] = useState<Record<string, boolean>>(() => {
+    try { return JSON.parse(localStorage.getItem(flagKey) || "{}"); } catch { return {}; }
+  });
 
   const answersRef = useRef(answers);
   const dirtyRef = useRef(false);
@@ -418,7 +442,7 @@ function ExamRunner({
   useEffect(() => {
     const t = setInterval(async () => {
       if (finishedRef.current) return;
-      try { handleServerState(await save()); } catch { dirtyRef.current = true; }
+      try { handleServerState(await save()); setLastSaved(Date.now()); setSaveFailed(false); } catch { dirtyRef.current = true; setSaveFailed(true); }
     }, 4000);
     return () => clearInterval(t);
   }, [save, handleServerState]);
@@ -609,7 +633,40 @@ function ExamRunner({
     }
   };
 
-  const answered = data.questions.filter((q) => (answers[q.id] ?? "").trim() || (images[q.id]?.length ?? 0) > 0).length;
+  const isAnswered = (q: ServedQuestion) => !!((answers[q.id] ?? "").trim() || (images[q.id]?.length ?? 0) > 0);
+  const answered = data.questions.filter(isAnswered).length;
+
+  const toggleFlag = (qid: string) => {
+    setFlags((p) => {
+      const next = { ...p, [qid]: !p[qid] };
+      if (!next[qid]) delete next[qid];
+      try { localStorage.setItem(flagKey, JSON.stringify(next)); } catch { /* ignore */ }
+      return next;
+    });
+  };
+
+  // التنقل: بنحفظ الإجابات عند كل انتقال
+  const goTo = useCallback((i: number) => {
+    const n = data.questions.length;
+    if (i < 0 || i >= n) return;
+    if (!data.allow_back && oneAtATime && i < cur) return;
+    void save().then((r) => { handleServerState(r); setLastSaved(Date.now()); setSaveFailed(false); }).catch(() => setSaveFailed(true));
+    if (oneAtATime) { setCur(i); window.scrollTo?.({ top: 0 }); document.querySelector(".exam-root")?.scrollTo?.({ top: 0 }); }
+    else { setCur(i); document.getElementById(`exam-q-${i}`)?.scrollIntoView({ behavior: "smooth", block: "start" }); }
+  }, [data.questions.length, data.allow_back, oneAtATime, cur, save, handleServerState]);
+
+  // أسهم الكيبورد (RTL: السهم الشمال = التالي) — مش بتشتغل وإنت بتكتب
+  useEffect(() => {
+    if (!oneAtATime) return;
+    const onKey = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement | null)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || e.ctrlKey || e.metaKey || e.altKey) return;
+      if (e.key === "ArrowLeft") goTo(cur + 1);
+      else if (e.key === "ArrowRight") goTo(cur - 1);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [oneAtATime, cur, goTo]);
 
   const blockClip = {
     "data-no-clipboard": true,
@@ -620,6 +677,157 @@ function ExamRunner({
     onContextMenu: (e: React.MouseEvent) => e.preventDefault(),
     autoComplete: "off",
   } as const;
+
+  const submitBlock = (
+    <div className="pt-4 pb-16">
+      {submitError && <div className="text-sm text-destructive mb-3">{submitError}</div>}
+      {!confirming ? (
+        <button onClick={askConfirm} disabled={submitting} className="btn-gold ripple inline-flex items-center gap-2 disabled:opacity-60">
+          <Send className="h-4 w-4" />تسليم الاختبار
+        </button>
+      ) : (
+        <div className="rounded-xl border border-[var(--gold)]/50 bg-[var(--gold)]/10 p-4">
+          <p className="mb-3 text-sm">
+            متأكد إنك عايز تسلّم؟ مش هتقدر تعدّل بعد كده
+            {answered < data.questions.length && ` (لسه ${data.questions.length - answered} سؤال من غير إجابة)`}
+            {Object.keys(flags).length > 0 && ` (و${Object.keys(flags).length} سؤال معلّم للمراجعة)`}.
+          </p>
+          <div className="flex gap-2">
+            <button onClick={submit} disabled={submitting} className="btn-gold ripple inline-flex items-center gap-2 disabled:opacity-60">
+              {submitting && <Loader2 className="h-4 w-4 animate-spin" />}تأكيد التسليم
+            </button>
+            <button onClick={() => setConfirming(false)} disabled={submitting} className="px-4 py-2 rounded-md border border-border">رجوع</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
+  const qProps = (q: ServedQuestion, i: number) => ({
+    index: i + 1, q, value: answers[q.id] ?? "", onChange: (v: string) => setAnswer(q.id, v), clip: blockClip,
+    images: images[q.id] ?? [], busy: !!imgBusy[q.id], error: imgErr[q.id] ?? "",
+    onActive: () => { activeQidRef.current = q.id; },
+    onAttach: (f: File) => uploadImage(q.id, f), onRemove: (n: string) => removeImage(q.id, n),
+  });
+
+  const overlays = (
+    <>
+      {notice && (
+        <div className="fixed bottom-6 inset-x-0 z-30 flex justify-center px-4 pointer-events-none">
+          <div className="rounded-lg border border-[var(--gold)]/50 bg-background px-4 py-2 text-sm shadow-lg">{notice}</div>
+        </div>
+      )}
+      {expired && (
+        <div className="fixed inset-0 z-20 bg-background/90 flex items-center justify-center">
+          <div className="text-center">
+            <Loader2 className="h-8 w-8 animate-spin text-[var(--gold)] mx-auto mb-3" />
+            <div className="font-bold">انتهى الوقت — جارٍ تسليم إجاباتك...</div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+
+  if (isNew) {
+    const total = data.questions.length;
+    const flaggedCount = Object.keys(flags).length;
+    const pct = total ? Math.round((answered / total) * 100) : 0;
+    const q = data.questions[cur];
+    const lockedBack = !data.allow_back && oneAtATime;
+    const rail = (
+      <div className="rounded-xl border border-border bg-card/80 p-4">
+        <div className="flex items-center justify-between mb-3 text-sm">
+          <span className="font-bold">الأسئلة</span>
+          <span className="text-xs text-muted-foreground">{answered}/{total}</span>
+        </div>
+        <div className="grid grid-cols-6 sm:grid-cols-8 lg:grid-cols-5 gap-2">
+          {data.questions.map((x, i) => {
+            const done = isAnswered(x);
+            const fl = !!flags[x.id];
+            const on = i === cur;
+            const disabled = lockedBack && i < cur;
+            return (
+              <button
+                key={x.id} type="button" disabled={disabled} onClick={() => goTo(i)}
+                title={`سؤال ${i + 1}${fl ? " — معلّم للمراجعة" : ""}${done ? " — تمت الإجابة" : ""}`}
+                className={`relative h-10 rounded-lg border text-sm font-bold transition disabled:opacity-40 disabled:cursor-not-allowed
+                  ${on ? "ring-2 ring-[var(--gold)] ring-offset-2 ring-offset-background" : ""}
+                  ${done ? "bg-[var(--gold)] border-[var(--gold)] text-[oklch(0.15_0.02_80)]" : "border-border hover:bg-white/5"}`}
+              >
+                {i + 1}
+                {fl && <Flag className="absolute -top-1.5 -right-1.5 h-4 w-4 text-orange-500 fill-orange-500" />}
+              </button>
+            );
+          })}
+        </div>
+        <div className="mt-4 space-y-1.5 text-xs text-muted-foreground">
+          <div className="flex items-center gap-2"><span className="h-3 w-3 rounded bg-[var(--gold)]" />تمت الإجابة</div>
+          <div className="flex items-center gap-2"><span className="h-3 w-3 rounded border border-border" />لم تُجب بعد</div>
+          <div className="flex items-center gap-2"><Flag className="h-3 w-3 text-orange-500 fill-orange-500" />معلّم للمراجعة ({flaggedCount})</div>
+        </div>
+      </div>
+    );
+
+    const navBar = oneAtATime && (
+      <div className="mt-5 flex flex-wrap items-center gap-3">
+        {!lockedBack && cur > 0 && (
+          <button type="button" onClick={() => goTo(cur - 1)} className="inline-flex items-center gap-1 px-4 py-2 rounded-lg border border-border hover:border-[var(--gold)]"><ChevronRight className="h-4 w-4" />السابق</button>
+        )}
+        <button
+          type="button" onClick={() => toggleFlag(q.id)}
+          className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg border transition ${flags[q.id] ? "border-orange-500 bg-orange-500/15 text-orange-500" : "border-border hover:border-orange-500/60"}`}
+        ><Flag className={`h-4 w-4 ${flags[q.id] ? "fill-orange-500" : ""}`} />{flags[q.id] ? "شيل علامة المراجعة" : "علّم للمراجعة"}</button>
+        {cur < total - 1 && (
+          <button type="button" onClick={() => goTo(cur + 1)} className="mr-auto btn-gold ripple inline-flex items-center gap-1">التالي<ChevronLeft className="h-4 w-4" /></button>
+        )}
+      </div>
+    );
+
+    return createPortal(
+      <div className="exam-root fixed inset-0 z-[70] overflow-y-auto bg-background">
+        <div className="sticky top-0 z-10 border-b border-border bg-background/95 backdrop-blur">
+          <div className="max-w-6xl mx-auto px-4 py-3 flex flex-wrap items-center gap-x-5 gap-y-2">
+            <div className="font-bold gold-text text-lg ml-auto">{data.title}</div>
+            {personalLeft !== null && <TimerBadge label="وقتك" ms={personalLeft} danger={personalLeft < 300_000} />}
+            {generalLeft !== null && <TimerBadge label="وقت الاختبار" ms={generalLeft} danger={generalLeft < 300_000} general />}
+            <div className={`text-xs inline-flex items-center gap-1 ${saveFailed ? "text-destructive" : "text-muted-foreground"}`}>
+              {saveFailed ? "تعذّر الحفظ — بنعيد المحاولة" : lastSaved ? <><CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />تم الحفظ</> : "الحفظ تلقائي"}
+            </div>
+          </div>
+          <div className="h-1 bg-border"><div className="h-full bg-[var(--gold)] transition-all" style={{ width: `${pct}%` }} /></div>
+        </div>
+
+        <div className="max-w-6xl mx-auto px-4 py-6 lg:grid lg:grid-cols-[17rem_minmax(0,1fr)] lg:gap-6 lg:items-start select-none">
+          <aside className="mb-5 lg:mb-0 lg:sticky lg:top-24">{rail}<div className="hidden lg:block mt-4">{submitBlock}</div></aside>
+          <div className="min-w-0">
+            {oneAtATime ? (
+              <>
+                <div className="text-xs text-muted-foreground mb-2">سؤال {cur + 1} من {total}{q.points ? ` • ${q.points} درجة` : ""}</div>
+                <QuestionCard key={q.id} {...qProps(q, cur)} />
+                {navBar}
+              </>
+            ) : (
+              <div className="space-y-5">
+                {data.questions.map((x, i) => (
+                  <div key={x.id} id={`exam-q-${i}`} className="scroll-mt-28">
+                    <QuestionCard {...qProps(x, i)} />
+                    <button
+                      type="button" onClick={() => toggleFlag(x.id)}
+                      className={`mt-2 inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border text-sm transition ${flags[x.id] ? "border-orange-500 bg-orange-500/15 text-orange-500" : "border-border hover:border-orange-500/60"}`}
+                    ><Flag className={`h-4 w-4 ${flags[x.id] ? "fill-orange-500" : ""}`} />{flags[x.id] ? "شيل علامة المراجعة" : "علّم للمراجعة"}</button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="lg:hidden mt-6">{submitBlock}</div>
+            {oneAtATime && cur === total - 1 && <div className="hidden lg:block mt-6 text-xs text-muted-foreground">دي آخر سؤال — التسليم من الزرار اللي على الجنب.</div>}
+          </div>
+        </div>
+        {overlays}
+      </div>,
+      document.body,
+    );
+  }
 
   // portal على document.body عشان شاشة الاختبار تغطي السايدبار (main عنده stacking context خاص)
   return createPortal(
@@ -647,43 +855,10 @@ function ExamRunner({
           />
         ))}
 
-        <div className="pt-4 pb-16">
-          {submitError && <div className="text-sm text-destructive mb-3">{submitError}</div>}
-          {!confirming ? (
-            <button onClick={askConfirm} disabled={submitting} className="btn-gold ripple inline-flex items-center gap-2 disabled:opacity-60">
-              <Send className="h-4 w-4" />تسليم الاختبار
-            </button>
-          ) : (
-            <div className="rounded-xl border border-[var(--gold)]/50 bg-[var(--gold)]/10 p-4">
-              <p className="mb-3 text-sm">
-                متأكد إنك عايز تسلّم؟ مش هتقدر تعدّل بعد كده
-                {answered < data.questions.length && ` (لسه ${data.questions.length - answered} سؤال من غير إجابة)`}.
-              </p>
-              <div className="flex gap-2">
-                <button onClick={submit} disabled={submitting} className="btn-gold ripple inline-flex items-center gap-2 disabled:opacity-60">
-                  {submitting && <Loader2 className="h-4 w-4 animate-spin" />}تأكيد التسليم
-                </button>
-                <button onClick={() => setConfirming(false)} disabled={submitting} className="px-4 py-2 rounded-md border border-border">رجوع</button>
-              </div>
-            </div>
-          )}
-        </div>
+        {submitBlock}
       </div>
 
-      {notice && (
-        <div className="fixed bottom-6 inset-x-0 z-30 flex justify-center px-4 pointer-events-none">
-          <div className="rounded-lg border border-[var(--gold)]/50 bg-background px-4 py-2 text-sm shadow-lg">{notice}</div>
-        </div>
-      )}
-
-      {expired && (
-        <div className="fixed inset-0 z-20 bg-background/90 flex items-center justify-center">
-          <div className="text-center">
-            <Loader2 className="h-8 w-8 animate-spin text-[var(--gold)] mx-auto mb-3" />
-            <div className="font-bold">انتهى الوقت — جارٍ تسليم إجاباتك...</div>
-          </div>
-        </div>
-      )}
+      {overlays}
     </div>,
     document.body,
   );

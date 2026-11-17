@@ -77,9 +77,93 @@ function ResultCard({ r }: { r: MyResult }) {
       </button>
 
       {open && (
-        <div className="mt-5 space-y-3 border-t border-border pt-5">
-          {r.items.map((it, i) => (
-            <div key={it.id} className={`rounded-lg border p-4 ${V[it.verdict].box}`}>
+        <div className="mt-5 border-t border-border pt-5">
+          <Summary r={r} />
+          {r.view === "new" ? <NewReview items={r.items} /> : (
+          <div className="space-y-3">
+          {r.items.map((it, i) => <ItemBox key={it.id} it={it} i={i} />)}
+          </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const TYPE_LABEL: Record<string, string> = {
+  choice: "اختيار من متعدد", short: "إجابة قصيرة", long: "مقالي", tf: "صح أو خطأ", tf_fix: "صح/خطأ مع تصويب", fix: "صحّح المعلومة",
+};
+
+/** ملخص: الدرجة حسب نوع السؤال + الأسئلة اللي محتاجة مراجعة */
+function Summary({ r }: { r: MyResult }) {
+  const groups = new Map<string, { got: number; max: number }>();
+  for (const it of r.items) {
+    const g = groups.get(it.type) ?? { got: 0, max: 0 };
+    g.got += it.score; g.max += it.max;
+    groups.set(it.type, g);
+  }
+  const review = r.items.map((it, i) => ({ it, n: i + 1 })).filter(({ it }) => it.verdict !== "correct");
+  return (
+    <div className="mb-5 grid gap-4 md:grid-cols-2">
+      <div className="rounded-lg border border-border p-4">
+        <div className="text-sm font-bold mb-3">الدرجة حسب نوع السؤال</div>
+        <div className="space-y-2.5">
+          {[...groups.entries()].map(([t, g]) => {
+            const pc = g.max > 0 ? Math.round((g.got / g.max) * 100) : 0;
+            return (
+              <div key={t}>
+                <div className="flex justify-between text-xs mb-1"><span>{TYPE_LABEL[t] ?? t}</span><span dir="ltr">{num(g.got)} / {num(g.max)}</span></div>
+                <div className="h-2 rounded bg-border overflow-hidden"><div className={`h-full ${pc >= 100 ? "bg-emerald-500" : pc >= 50 ? "bg-yellow-500" : "bg-destructive"}`} style={{ width: `${pc}%` }} /></div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+      <div className="rounded-lg border border-border p-4">
+        <div className="text-sm font-bold mb-3">أسئلة تراجعها {review.length > 0 && <span className="text-muted-foreground font-normal">({review.length})</span>}</div>
+        {review.length === 0 ? (
+          <div className="text-sm text-emerald-500">ممتاز — كل إجاباتك كاملة.</div>
+        ) : (
+          <div className="flex flex-wrap gap-2">
+            {review.map(({ it, n }) => (
+              <span key={it.id} className={`h-8 min-w-8 px-2 rounded-lg border text-sm font-bold inline-flex items-center justify-center ${V[it.verdict].box} ${V[it.verdict].text}`}>{n}</span>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** مراجعة بالشكل الجديد: شريط أرقام ملوّن بالنتيجة + سؤال واحد */
+function NewReview({ items }: { items: MyResult["items"] }) {
+  const [cur, setCur] = useState(0);
+  const it = items[cur];
+  if (!it) return null;
+  return (
+    <div className="lg:grid lg:grid-cols-[12rem_minmax(0,1fr)] lg:gap-4">
+      <div className="grid grid-cols-8 sm:grid-cols-10 lg:grid-cols-4 gap-2 content-start mb-4 lg:mb-0">
+        {items.map((x, i) => (
+          <button
+            key={x.id} type="button" onClick={() => setCur(i)}
+            className={`h-9 rounded-lg border text-sm font-bold ${V[x.verdict].box} ${V[x.verdict].text} ${i === cur ? "ring-2 ring-[var(--gold)]" : ""}`}
+          >{i + 1}</button>
+        ))}
+      </div>
+      <div>
+        <ItemBox it={it} i={cur} />
+        <div className="mt-3 flex justify-between">
+          <button type="button" disabled={cur === 0} onClick={() => setCur(cur - 1)} className="px-4 py-2 rounded-lg border border-border disabled:opacity-40">السابق</button>
+          <button type="button" disabled={cur === items.length - 1} onClick={() => setCur(cur + 1)} className="px-4 py-2 rounded-lg border border-border disabled:opacity-40">التالي</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ItemBox({ it, i }: { it: MyResult["items"][number]; i: number }) {
+  return (
+            <div className={`rounded-lg border p-4 ${V[it.verdict].box}`}>
               <div className="flex items-start gap-3">
                 <div className="mt-0.5 shrink-0">
                   {it.verdict === "correct" ? <CheckCircle2 className={`h-5 w-5 ${V.correct.text}`} /> : it.verdict === "wrong" ? <XCircle className={`h-5 w-5 ${V.wrong.text}`} /> : <MinusCircle className={`h-5 w-5 ${V[it.verdict].text}`} />}
@@ -102,9 +186,5 @@ function ResultCard({ r }: { r: MyResult }) {
                 </div>
               )}
             </div>
-          ))}
-        </div>
-      )}
-    </div>
   );
 }

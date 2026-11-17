@@ -101,6 +101,14 @@ function ExamsIndex() {
                   <span className="inline-flex items-center gap-1"><CalendarX className="h-3.5 w-3.5" />ينتهي {formatDate(e.ends_at)}</span>
                 )}
                 {e.closed && <span className="px-2 py-0.5 rounded bg-destructive/20 text-destructive">منتهي</span>}
+                {!e.mine && !e.closed && me && <span className="px-2 py-0.5 rounded bg-white/10">لم تبدأ</span>}
+                {e.mine?.status === "in_progress" && <span className="px-2 py-0.5 rounded bg-yellow-500/20 text-yellow-500">جارٍ</span>}
+                {e.mine?.status === "blocked" && <span className="px-2 py-0.5 rounded bg-destructive/20 text-destructive">موقوف</span>}
+                {e.mine?.status === "submitted" && (
+                  <span className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-500">
+                    تم التسليم{e.mine.total !== null ? ` • ${Math.round(e.mine.total * 100) / 100} / ${Math.round(e.mine.max * 100) / 100}` : " • في انتظار التصحيح"}
+                  </span>
+                )}
                 <span className="mr-auto inline-flex items-center gap-1 text-[var(--gold)]">دخول<ArrowLeft className="h-3.5 w-3.5" /></span>
               </div>
             </Link>
