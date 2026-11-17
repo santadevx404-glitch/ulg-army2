@@ -77,12 +77,12 @@ export const myExamResultsFn = createServerFn({ method: "GET" }).handler(async (
 });
 
 export const saveAnswersFn = createServerFn({ method: "POST" })
-  .validator((d: { attemptId: string; token: string; answers: Record<string, string>; final?: boolean; left?: boolean }) => d)
-  .handler(async ({ data }) => exams.saveAnswers(data.attemptId, data.token, data.answers, !!data.final, !!data.left));
+  .validator((d: { attemptId: string; token: string; answers: Record<string, string>; final?: boolean; left?: string; cur?: string; seen?: number }) => d)
+  .handler(async ({ data }) => exams.saveAnswers(data.attemptId, data.token, data.answers, !!data.final, data.left ? String(data.left) : "", data.cur, data.seen ?? 0));
 
 export const reportLeaveFn = createServerFn({ method: "POST" })
-  .validator((d: { attemptId: string; token: string; reason: exams.BlockReason; answers?: Record<string, string> }) => d)
-  .handler(async ({ data }) => exams.reportLeave(data.attemptId, data.token, data.reason, data.answers));
+  .validator((d: { attemptId: string; token: string; reason: exams.BlockReason; answers?: Record<string, string>; vid?: string; cur?: string }) => d)
+  .handler(async ({ data }) => exams.reportLeave(data.attemptId, data.token, data.reason, data.answers, data.vid, data.cur));
 
 // ==================== لوحة التحكم ====================
 // كل دالة بتفحص الصلاحية على السيرفر (عامة أو على الاختبار المحدد، وحتى مستوى الحقل).

@@ -59,6 +59,8 @@ export type Exam = {
   attempt_minutes: number | null; // التايمر الشخصي (من لحظة فتح الاختبار)
   ends_at: string | null; // التايمر العام (ISO)
   block_on_tab_switch: boolean; // يحظر لو الشخص بدّل التاب
+  tab_chances: number; // كام مرة يتسامح معاه (تحذير) قبل الحظر. 0 = حظر فوري
+  tab_actions: TabAction[]; // الإجراء لكل فرصة (بالترتيب)
   exam_view: "classic" | "new"; // شكل شاشة الاختبار: classic = القديم | new = سؤال واحد وشريط أرقام
   exam_layout: "one" | "all"; // (الجديد) سؤال سؤال أو كل الأسئلة في صفحة
   allow_back: boolean; // (الجديد) السماح بالرجوع للأسئلة السابقة
@@ -84,6 +86,9 @@ export type ServedQuestion = {
 export type AttemptStatus = "in_progress" | "submitted" | "blocked" | "unblocked" | "retired";
 export type SubmitReason = "manual" | "attempt_timer" | "exam_timer";
 export type BlockReason = "leave" | "tab_switch" | "reentry";
+export type TabAction = "warn" | "swap"; // تحذير فقط | تحذير + تبديل السؤال الحالي (أو تصفيره لو مفيش بديل)
+/** إشعار مخالفة بيتبعت للطالب: warn = تحذير • swap = السؤال اتبدّل • zero = السؤال اتصفّر */
+export type ViolationNotice = { n: number; kind: "warn" | "swap" | "zero"; used: number; total: number; qid?: string; new_qid?: string; at: string };
 
 export type Attempt = {
   id: string;
@@ -111,6 +116,11 @@ export type Attempt = {
   block_reason: BlockReason | null;
   blocked_at: string | null;
   unblocked_at: string | null;
+  violations: number; // عدد مرات تبديل التاب اللي اتحسبت
+  violation_ids: string[]; // معرّفات المخالفات (لمنع العدّ المكرر)
+  last_violation_at: string | null;
+  notices: ViolationNotice[]; // إشعارات للطالب (تحذير/تبديل/تصفير)
+  zeroed: string[]; // أسئلة اتصفّرت أوتوماتيك بسبب مخالفة
 };
 
 type ExamsDB = { exams: Exam[]; questions: Question[] };
@@ -122,6 +132,7 @@ const withLock = makeLock();
 
 function normalizeExam(e: Partial<Exam>): Exam {
   const now = new Date().toISOString();
+  const chances = Math.min(20, Math.max(0, Math.floor(Number(e.tab_chances) || 0)));
   return {
     id: e.id ?? crypto.randomUUID(),
     title: e.title ?? "",
@@ -137,6 +148,8 @@ function normalizeExam(e: Partial<Exam>): Exam {
     attempt_minutes: e.attempt_minutes ?? null,
     ends_at: e.ends_at ?? null,
     block_on_tab_switch: e.block_on_tab_switch ?? false,
+    tab_chances: chances,
+    tab_actions: Array.from({ length: chances }, (_, i) => (Array.isArray(e.tab_actions) && e.tab_actions[i] === "swap" ? "swap" : "warn") as TabAction),
     exam_view: e.exam_view === "new" ? "new" : "classic",
     exam_layout: e.exam_layout === "all" ? "all" : "one",
     allow_back: e.allow_back ?? true,
@@ -180,6 +193,11 @@ async function readAttemptsDb(): Promise<AttemptsDB> {
       feedback: a.feedback ?? {},
       graded_at: a.graded_at ?? null,
       graded_by: a.graded_by ?? null,
+      violations: a.violations ?? 0,
+      violation_ids: a.violation_ids ?? [],
+      last_violation_at: a.last_violation_at ?? null,
+      notices: a.notices ?? [],
+      zeroed: a.zeroed ?? [],
       questions: (a.questions ?? []).map((q) => ({ ...q, image_mode: q.image_mode ?? "none", max_images: q.max_images ?? 3, points: typeof q.points === "number" ? q.points : 1 })),
     })),
   };
@@ -241,7 +259,7 @@ function sanitizeAnswers(att: Attempt, incoming: Record<string, unknown> | undef
   const allowed = new Set(att.questions.map((q) => q.id));
   const out: Record<string, string> = { ...att.answers };
   for (const [k, v] of Object.entries(incoming ?? {})) {
-    if (!allowed.has(k)) continue;
+    if (!allowed.has(k) || att.zeroed.includes(k)) continue; // سؤال اتصفّر = مفيش تعديل
     out[k] = String(v ?? "").slice(0, 20_000);
   }
   return out;
@@ -438,7 +456,7 @@ export type StartResult =
   | { state: "error"; error: string }
   | { state: "closed"; message: string }
   | { state: "submitted"; message: string }
-  | { state: "blocked"; code: string; message: string }
+  | { state: "blocked"; code: string; message: string; reason?: BlockReason | null; used?: number; total?: number }
   | {
       state: "started";
       attemptId: string;
@@ -449,6 +467,7 @@ export type StartResult =
       exam_ends_at: string | null;
       server_now: string;
       block_on_tab_switch: boolean;
+      tab_chances: number;
       title: string;
       view: "classic" | "new";
       layout: "one" | "all";
@@ -461,6 +480,10 @@ export type ExamUser = { id: string; account_name: string; character_name: strin
 const identityOf = (u: ExamUser) => `u:${u.id}`;
 function fieldsOf(u: ExamUser): Record<string, string> {
   return { "اسم الحساب": u.account_name, "الاسم": u.character_name };
+}
+
+function blockedOf(att: Attempt, exam: Exam) {
+  return { state: "blocked" as const, code: att.block_code ?? "", message: exam.block_message, reason: att.block_reason, used: att.violations, total: exam.tab_chances };
 }
 
 /** بيحسم حالة الشخص لو عنده محاولات سابقة، من غير ما يعمل محاولة جديدة. */
@@ -476,7 +499,7 @@ function resolveExisting(
 
   const blocked = mine.find((a) => a.status === "blocked");
   if (blocked) {
-    return { result: { state: "blocked", code: blocked.block_code ?? "", message: exam.block_message }, dirty };
+    return { result: blockedOf(blocked, exam), dirty };
   }
 
   const running = mine.find((a) => a.status === "in_progress");
@@ -487,7 +510,7 @@ function resolveExisting(
     running.block_reason = "reentry";
     running.blocked_at = new Date(now).toISOString();
     running.block_code = makeBlockCode(new Set(allAttempts.map((a) => a.block_code ?? "")));
-    return { result: { state: "blocked", code: running.block_code, message: exam.block_message }, dirty: true };
+    return { result: blockedOf(running, exam), dirty: true };
   }
 
   const done = mine.find((a) => a.status === "submitted");
@@ -579,6 +602,11 @@ export async function startExam(examId: string, user: ExamUser, accessToken?: st
       block_reason: null,
       blocked_at: null,
       unblocked_at: null,
+      violations: 0,
+      violation_ids: [],
+      last_violation_at: null,
+      notices: [],
+      zeroed: [],
     };
     attemptsDb.attempts.push(att);
     await writeAttemptsDb(attemptsDb);
@@ -593,6 +621,7 @@ export async function startExam(examId: string, user: ExamUser, accessToken?: st
       exam_ends_at: exam.ends_at,
       server_now: startedAt.toISOString(),
       block_on_tab_switch: exam.block_on_tab_switch,
+      tab_chances: exam.tab_chances,
       title: exam.title,
       view: exam.exam_view,
       layout: exam.exam_layout,
@@ -632,9 +661,9 @@ export async function pollExamState(examId: string, user: ExamUser, accessToken?
 
 export type SaveResult =
   | { state: "invalid" }
-  | { state: "ok"; server_now: string }
+  | { state: "ok"; server_now: string; used: number; total: number; notices: ViolationNotice[]; notice_count: number; questions?: ServedQuestion[]; zeroed?: string[] }
   | { state: "submitted"; message: string; reason: SubmitReason | null }
-  | { state: "blocked"; code: string; message: string };
+  | { state: "blocked"; code: string; message: string; reason?: BlockReason | null; used?: number; total?: number };
 
 async function loadAttemptForClient(attemptId: string, token: string) {
   const attemptsDb = await readAttemptsDb();
@@ -643,16 +672,83 @@ async function loadAttemptForClient(attemptId: string, token: string) {
   const exams = await readExamsDb();
   const exam = exams.exams.find((e) => e.id === att.exam_id);
   if (!exam) return null;
-  return { attemptsDb, att, exam };
+  return { attemptsDb, att, exam, bank: exams.questions.filter((q) => q.exam_id === exam.id) };
 }
 
 function terminalResult(att: Attempt, exam: Exam): SaveResult | null {
-  if (att.status === "blocked") return { state: "blocked", code: att.block_code ?? "", message: exam.block_message };
+  if (att.status === "blocked") return blockedOf(att, exam);
   if (att.status === "submitted") {
     return { state: "submitted", message: messageFor(exam, att.submit_reason), reason: att.submit_reason };
   }
   if (att.status !== "in_progress") return { state: "invalid" };
   return null;
+}
+
+/**
+ * مخالفة تبديل تاب: لو لسه فيه فرص بتتسجّل كتحذير (وممكن تبدّل السؤال الحالي أو تصفّره)،
+ * ولو الفرص خلصت بيتحظر. vid = معرّف المخالفة (نفس المخالفة ممكن توصل من أكتر من طريق فمتتعدّش مرتين).
+ */
+async function applyTabViolation(
+  attemptsDb: AttemptsDB, att: Attempt, exam: Exam, bank: Question[], vid: string, curQid: string | undefined, nowIso: string,
+): Promise<"blocked" | "recorded" | "dup"> {
+  if (att.violation_ids.includes(vid)) return "dup";
+  att.violation_ids = [...att.violation_ids.slice(-50), vid];
+  att.violations += 1;
+  att.last_violation_at = nowIso;
+
+  if (att.violations > exam.tab_chances) {
+    att.status = "blocked";
+    att.block_reason = "tab_switch";
+    att.blocked_at = nowIso;
+    att.block_code = makeBlockCode(new Set(attemptsDb.attempts.map((a) => a.block_code ?? "")));
+    att.last_saved_at = nowIso;
+    return "blocked";
+  }
+
+  const base = { n: att.notices.length + 1, used: att.violations, total: exam.tab_chances, at: nowIso };
+  const action: TabAction = exam.tab_actions[att.violations - 1] ?? "warn";
+  if (action === "swap") {
+    // السؤال اللي واقف عليه (أو أول سؤال لسه من غير إجابة)
+    const live = (id?: string) => (id && att.questions.some((q) => q.id === id) && !att.zeroed.includes(id) ? id : undefined);
+    const target = live(curQid) ?? att.questions.find((q) => !att.zeroed.includes(q.id) && !((att.answers[q.id] ?? "").trim()))?.id ?? att.questions.find((q) => !att.zeroed.includes(q.id))?.id;
+    if (target) {
+      const used = new Set([...att.questions.map((q) => q.id), ...att.notices.flatMap((n) => (n.qid ? [n.qid] : []))]);
+      const pool = bank.filter((q) => !used.has(q.id));
+      const pick = pool.length ? pool[crypto.randomInt(0, pool.length)] : null;
+      if (pick) {
+        const idx = att.questions.findIndex((q) => q.id === target);
+        att.questions = att.questions.map((q, i) => i === idx ? {
+          id: pick.id, type: pick.type, text: pick.text,
+          options: pick.type === "choice" ? (exam.shuffle ? shuffle(pick.options) : pick.options) : [],
+          image_mode: pick.image_mode, max_images: pick.max_images, points: pick.points,
+        } : q);
+        const oldImgs = att.images[target] ?? [];
+        const { [target]: _a, ...restAns } = att.answers; void _a;
+        const { [target]: _i, ...restImg } = att.images; void _i;
+        att.answers = restAns;
+        att.images = restImg;
+        if (oldImgs.length) await deleteExamImages(oldImgs);
+        att.notices = [...att.notices, { ...base, kind: "swap", qid: target, new_qid: pick.id }];
+        return "recorded";
+      }
+      // مفيش سؤال بديل: السؤال بياخد 0 تلقائي والطالب يكمّل على اللي بعده
+      att.zeroed = [...att.zeroed, target];
+      att.answers = { ...att.answers, [target]: "" };
+      att.notices = [...att.notices, { ...base, kind: "zero", qid: target }];
+      return "recorded";
+    }
+  }
+  att.notices = [...att.notices, { ...base, kind: "warn" }];
+  return "recorded";
+}
+
+function okResult(att: Attempt, exam: Exam, nowIso: string, seen: number): SaveResult {
+  const fresh = att.notices.slice(Math.max(0, Math.floor(seen) || 0));
+  return {
+    state: "ok", server_now: nowIso, used: att.violations, total: exam.tab_chances,
+    notices: fresh, notice_count: att.notices.length,
+    ...(fresh.length ? { questions: att.questions, zeroed: att.zeroed } : {}),
+  };
 }
 
 /** أقصى فجوة بين نبضتين قبل ما نعتبر الطالب سابق الصفحة (النبض كل 4 ثواني). */
@@ -664,12 +760,14 @@ export async function saveAnswers(
   token: string,
   answers: Record<string, string>,
   final = false,
-  leftFlag = false, // المتصفح بلّغ إن الطالب سابقتا النافذة (تبديل تاب/برنامج) والبلاغ الأول ماوصلش
+  leftId = "", // المتصفح بلّغ إن الطالب سابق النافذة (تبديل تاب/برنامج) — معرّف المخالفة
+  curQid?: string, // السؤال اللي واقف عليه الطالب (للتبديل)
+  seen = 0, // عدد الإشعارات اللي الطالب شافها
 ): Promise<SaveResult> {
   return withLock(async () => {
     const loaded = await loadAttemptForClient(attemptId, token);
     if (!loaded) return { state: "invalid" } as SaveResult;
-    const { attemptsDb, att, exam } = loaded;
+    const { attemptsDb, att, exam, bank } = loaded;
     const now = Date.now();
 
     const terminal = terminalResult(att, exam);
@@ -693,14 +791,16 @@ export async function saveAnswers(
     if (exam.block_on_tab_switch) {
       const lastSeen = att.last_seen_at ? Date.parse(att.last_seen_at) : NaN;
       const gap = Number.isFinite(lastSeen) ? now - lastSeen : 0;
-      if (leftFlag || gap > HEARTBEAT_GAP_MS) {
-        att.status = "blocked";
-        att.block_reason = "tab_switch";
-        att.blocked_at = nowIso;
-        att.block_code = makeBlockCode(new Set(attemptsDb.attempts.map((a) => a.block_code ?? "")));
-        att.last_saved_at = nowIso;
-        await writeAttemptsDb(attemptsDb);
-        return terminalResult(att, exam) ?? ({ state: "invalid" } as SaveResult);
+      let vid = String(leftId || "").slice(0, 60);
+      // انقطاع النبض: بيتحسب مخالفة بس لو مفيش مخالفة اتسجّلت بالفعل من وقت آخر نبضة
+      const alreadyCounted = att.last_violation_at && Number.isFinite(lastSeen) && Date.parse(att.last_violation_at) >= lastSeen;
+      if (!vid && gap > HEARTBEAT_GAP_MS && !alreadyCounted) vid = `gap:${att.last_seen_at}`;
+      if (vid) {
+        const r = await applyTabViolation(attemptsDb, att, exam, bank, vid, curQid, nowIso);
+        if (r === "blocked") {
+          await writeAttemptsDb(attemptsDb);
+          return terminalResult(att, exam) ?? ({ state: "invalid" } as SaveResult);
+        }
       }
     }
 
@@ -713,7 +813,7 @@ export async function saveAnswers(
       return { state: "submitted", message: exam.submit_message, reason: "manual" };
     }
     await writeAttemptsDb(attemptsDb);
-    return { state: "ok", server_now: nowIso };
+    return okResult(att, exam, nowIso, seen);
   });
 }
 
@@ -777,11 +877,13 @@ export async function reportLeave(
   token: string,
   reason: BlockReason,
   answers?: Record<string, string>,
+  vid?: string,
+  curQid?: string,
 ): Promise<{ ok: boolean }> {
   return withLock(async () => {
     const loaded = await loadAttemptForClient(attemptId, token);
     if (!loaded) return { ok: false };
-    const { attemptsDb, att, exam } = loaded;
+    const { attemptsDb, att, exam, bank } = loaded;
     if (att.status !== "in_progress") return { ok: true };
 
     const now = Date.now();
@@ -792,6 +894,13 @@ export async function reportLeave(
       return { ok: true };
     }
     if (reason === "tab_switch" && !exam.block_on_tab_switch) return { ok: true };
+
+    if (reason === "tab_switch") {
+      // تبديل تاب: فرصة/تحذير (أو حظر لو الفرص خلصت)
+      await applyTabViolation(attemptsDb, att, exam, bank, String(vid || `beacon:${now}`).slice(0, 60), curQid, new Date(now).toISOString());
+      await writeAttemptsDb(attemptsDb);
+      return { ok: true };
+    }
 
     att.status = "blocked";
     att.block_reason = reason;
@@ -855,6 +964,7 @@ function autoFeedback(type: QType, q: Question | undefined): string | null {
 export function gradeAttempt(att: Attempt, exam: Exam | undefined, live: Map<string, Question>): AttemptGrade {
   const items: QGrade[] = att.questions.map((sq) => {
     const max = sq.points;
+    if (att.zeroed.includes(sq.id)) return { id: sq.id, max, score: 0, auto: true }; // اتصفّر بسبب مخالفة
     const manual = att.scores[sq.id];
     if (typeof manual === "number") return { id: sq.id, max, score: Math.min(max, Math.max(0, manual)), auto: false };
     if (exam?.grading === "auto") {
@@ -981,7 +1091,7 @@ export async function myResults(userId: string): Promise<MyResult[]> {
               max: sq.points,
               score,
               verdict: verdictOf(score, sq.points),
-              feedback: score >= sq.points ? null : a.feedback[sq.id] || (g.items[i].auto ? autoFeedback(sq.type, live.get(sq.id)) : null),
+              feedback: a.zeroed.includes(sq.id) ? "اتصفّر السؤال ده تلقائيًا بسبب مخالفة تبديل التبويب أثناء الاختبار." : score >= sq.points ? null : a.feedback[sq.id] || (g.items[i].auto ? autoFeedback(sq.type, live.get(sq.id)) : null),
             } satisfies MyResultItem;
           })
         : [],
@@ -1252,6 +1362,8 @@ export type AdminAttemptRow = {
   max: number;
   graded: boolean;
   user_id: string | null;
+  violations: number;
+  zeroed: number;
 };
 
 export async function adminListAttempts(): Promise<AdminAttemptRow[]> {
@@ -1284,6 +1396,8 @@ export async function adminListAttempts(): Promise<AdminAttemptRow[]> {
         last_seen_at: a.last_seen_at,
         answered: a.questions.filter((q) => (a.answers[q.id] ?? "").trim() || (a.images[q.id] ?? []).length > 0).length,
         total: a.questions.length,
+        violations: a.violations,
+        zeroed: a.zeroed.length,
         ...(() => {
           const g = gradeAttempt(a, exams.exams.find((e) => e.id === a.exam_id), qLive);
           return { score: g.complete || a.graded_at ? g.total : null, max: g.max, graded: isReleased(a, g), user_id: a.user_id };

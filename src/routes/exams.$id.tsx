@@ -2,11 +2,11 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { motion } from "framer-motion";
-import { AlertTriangle, CheckCircle2, ChevronLeft, ChevronRight, Clock, Flag, HelpCircle, ImagePlus, ListChecks, Loader2, Lock, Send, ShieldAlert, Timer, X } from "lucide-react";
+import { AlertTriangle, Ban, CheckCircle2, ChevronLeft, ChevronRight, Clipboard, Clock, Flag, HelpCircle, ImagePlus, ListChecks, Loader2, Lock, Send, ShieldAlert, Timer, X } from "lucide-react";
 import { publicExamFn, startExamFn, pollExamFn, saveAnswersFn, unlockExamFn } from "@/lib/exam-fns";
 import { useMe } from "@/lib/use-me";
 import { NO_ERRORS, TF_FALSE, TF_TRUE, buildFix, buildNone, isNoErrors, buildTfFix, parseFix, parseTfFix, tokenize, type FixEdit } from "@/lib/answer-format";
-import type { PublicExamInfo, ServedQuestion, StartResult } from "@/lib/exams.server";
+import type { PublicExamInfo, ServedQuestion, StartResult, ViolationNotice } from "@/lib/exams.server";
 
 export const Route = createFileRoute("/exams/$id")({
   head: () => ({ meta: [{ title: "اختبار — حرس الحدود" }, { name: "robots", content: "noindex" }] }),
@@ -24,7 +24,7 @@ type Phase =
   | { k: "gate"; title: string | null }
   | { k: "intake" }
   | { k: "running"; data: Started }
-  | { k: "blocked"; code: string; message: string }
+  | { k: "blocked"; code: string; message: string; reason?: string | null; used?: number; total?: number }
   | { k: "done"; message: string }
   | { k: "closed"; message: string };
 
@@ -71,7 +71,7 @@ function ExamPage() {
   const applyResult = useCallback((r: StartResult) => {
     if (r.state === "error") return setError(r.error);
     if (r.state === "started") return setPhase({ k: "running", data: r });
-    if (r.state === "blocked") return setPhase({ k: "blocked", code: r.code, message: r.message });
+    if (r.state === "blocked") return setPhase({ k: "blocked", code: r.code, message: r.message, reason: r.reason, used: r.used, total: r.total });
     if (r.state === "submitted") return setPhase({ k: "done", message: r.message });
     if (r.state === "closed") return setPhase({ k: "closed", message: r.message });
   }, []);
@@ -116,7 +116,7 @@ function ExamPage() {
     return (
       <ExamRunner
         data={phase.data}
-        onBlocked={(code, message) => setPhase({ k: "blocked", code, message })}
+        onBlocked={(code, message, extra) => setPhase({ k: "blocked", code, message, ...extra })}
         onDone={(message) => setPhase({ k: "done", message })}
       />
     );
@@ -129,6 +129,9 @@ function ExamPage() {
         accessToken={token}
         code={phase.code}
         message={phase.message}
+        reason={phase.reason}
+        used={phase.used}
+        total={phase.total}
         onResult={applyResult}
       />
     );
@@ -230,16 +233,20 @@ function Centered({ children }: { children: React.ReactNode }) {
 // ============================== شاشة الحظر ==============================
 
 function BlockedScreen({
-  examId, accessToken, code, message, onResult,
+  examId, accessToken, code, message, reason, used, total, onResult,
 }: {
   examId: string;
   accessToken: string | null;
   code: string;
   message: string;
+  reason?: string | null;
+  used?: number;
+  total?: number;
   onResult: (r: StartResult) => void;
 }) {
   const [released, setReleased] = useState(false);
   const [starting, setStarting] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   // بنسأل السيرفر كل كام ثانية لو الأدمن فك الحظر
   useEffect(() => {
@@ -268,31 +275,111 @@ function BlockedScreen({
     }
   };
 
-  return (
-    <Centered>
-      {released ? (
-        <>
-          <CheckCircle2 className="h-14 w-14 text-[var(--gold)] mx-auto mb-4" />
-          <h1 className="text-2xl font-bold gold-text mb-2">تم فك الحظر</h1>
-          <p className="text-muted-foreground mb-6">هتبدأ الاختبار بأسئلة جديدة، والوقت بيبدأ من أول ما تضغط.</p>
+  const copy = async () => {
+    try { await navigator.clipboard.writeText(code); setCopied(true); setTimeout(() => setCopied(false), 2000); } catch { /* ignore */ }
+  };
+
+  const why =
+    reason === "tab_switch"
+      ? (total && total > 0 ? `بدّلت التبويب أو خرجت من نافذة الاختبار، وخلّصت كل فرصك (${total}).` : "بدّلت التبويب أو خرجت من نافذة الاختبار.")
+      : reason === "reentry"
+        ? "حدّثت الصفحة أو دخلت الاختبار تاني وهو شغال."
+        : "غادرت صفحة الاختبار أثناء ما هو شغال.";
+
+  if (released) {
+    return (
+      <Centered>
+        <div className="rounded-2xl border border-emerald-500/40 bg-emerald-500/5 p-8">
+          <CheckCircle2 className="h-14 w-14 text-emerald-500 mx-auto mb-4" />
+          <h1 className="text-2xl font-black text-emerald-500 mb-2">تم فك الحظر</h1>
+          <p className="text-muted-foreground mb-6 leading-loose">هتبدأ الاختبار بأسئلة جديدة، والوقت بيبدأ من أول ما تضغط.</p>
           <button onClick={start} disabled={starting} className="btn-gold ripple inline-flex items-center gap-2 disabled:opacity-60">
             {starting && <Loader2 className="h-4 w-4 animate-spin" />}ابدأ الاختبار
           </button>
-        </>
-      ) : (
-        <>
-          <ShieldAlert className="h-14 w-14 text-destructive mx-auto mb-4" />
-          <p className="text-lg leading-loose whitespace-pre-wrap mb-6">{message}</p>
-          <div className="inline-block rounded-xl border border-destructive/50 bg-destructive/10 px-8 py-4">
-            <div className="text-xs text-muted-foreground mb-1">كود الحظر</div>
-            <div dir="ltr" className="text-3xl font-black tracking-widest text-destructive select-all">{code}</div>
+        </div>
+      </Centered>
+    );
+  }
+
+  return (
+    <div className="min-h-[80vh] flex items-center justify-center p-4 md:p-6">
+      <div className="w-full max-w-xl overflow-hidden rounded-2xl border border-destructive/40 bg-card shadow-2xl">
+        <div className="bg-gradient-to-b from-destructive/25 to-transparent px-6 pt-8 pb-5 text-center">
+          <div className="relative mx-auto mb-4 h-20 w-20">
+            <span className="absolute inset-0 rounded-full bg-destructive/20 animate-ping" />
+            <span className="relative flex h-20 w-20 items-center justify-center rounded-full bg-destructive/15 border-2 border-destructive/60">
+              <Ban className="h-10 w-10 text-destructive" />
+            </span>
           </div>
+          <h1 className="text-3xl font-black text-destructive">تم إيقافك عن الاختبار</h1>
+          <p className="mt-2 text-sm text-muted-foreground leading-loose">{why}</p>
+          {total !== undefined && total > 0 && used !== undefined && (
+            <div className="mt-3 inline-flex items-center gap-1.5">
+              {Array.from({ length: total }, (_, i) => <span key={i} className="h-2.5 w-2.5 rounded-full bg-destructive/50" />)}
+              <span className="mr-2 text-xs text-muted-foreground">استُهلكت {Math.min(used, total)} من {total} فرص</span>
+            </div>
+          )}
+        </div>
+
+        <div className="px-6 pb-7">
+          {message && <p className="text-sm leading-loose whitespace-pre-wrap text-center mb-5 text-foreground/90">{message}</p>}
+
+          <div className="rounded-xl border-2 border-dashed border-destructive/50 bg-destructive/5 p-4 text-center">
+            <div className="text-xs text-muted-foreground mb-1">كود الحظر — ابعته للإدارة</div>
+            <div dir="ltr" className="text-4xl font-black tracking-[0.25em] text-destructive select-all">{code}</div>
+            <button type="button" onClick={copy} className="mt-3 inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1 text-xs hover:border-destructive transition">
+              <Clipboard className="h-3.5 w-3.5" />{copied ? "تم النسخ ✓" : "نسخ الكود"}
+            </button>
+          </div>
+
+          <ol className="mt-5 space-y-2 text-sm">
+            {["ابعت الكود للإدارة.", "استنى لحد ما يفكوا الحظر.", "الصفحة بتتحدّث لوحدها وبيظهرلك زرار البدء."].map((t, i) => (
+              <li key={i} className="flex items-center gap-3">
+                <span className="h-6 w-6 shrink-0 rounded-full bg-[var(--gold)]/20 text-[var(--gold)] text-xs font-bold flex items-center justify-center">{i + 1}</span>
+                <span className="text-foreground/90">{t}</span>
+              </li>
+            ))}
+          </ol>
+
           <p className="text-xs text-muted-foreground mt-6 flex items-center justify-center gap-2">
-            <Loader2 className="h-3 w-3 animate-spin" />الصفحة بتتحدّث لوحدها أول ما الحظر يتفك
+            <Loader2 className="h-3 w-3 animate-spin" />بنراجع كل كام ثانية لو الحظر اتفك
           </p>
-        </>
-      )}
-    </Centered>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** نافذة التحذير بعد كل مخالفة (تبديل تاب): تحذير • تبديل السؤال • تصفير السؤال */
+function ViolationModal({ notices, onClose }: { notices: ViolationNotice[]; onClose: () => void }) {
+  const last = notices[notices.length - 1];
+  const remaining = Math.max(0, last.total - last.used);
+  const detail =
+    last.kind === "swap"
+      ? "اتبدّل السؤال اللي كنت واقف عليه بسؤال تاني، وإجابتك على السؤال القديم اتمسحت."
+      : last.kind === "zero"
+        ? "مفيش سؤال بديل متاح، فالسؤال اللي كنت واقف عليه اتصفّر تلقائيًا وانتقلت للي بعده."
+        : "المرة دي تحذير بس.";
+  return (
+    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
+      <div className="w-full max-w-md overflow-hidden rounded-2xl border border-orange-500/50 bg-card shadow-2xl">
+        <div className="bg-gradient-to-b from-orange-500/25 to-transparent px-6 pt-7 pb-4 text-center">
+          <div className="mx-auto mb-3 flex h-16 w-16 items-center justify-center rounded-full bg-orange-500/20 border-2 border-orange-500/60">
+            <AlertTriangle className="h-8 w-8 text-orange-500" />
+          </div>
+          <h2 className="text-2xl font-black text-orange-500">تحذير {last.used} من {last.total}</h2>
+          <p className="mt-1 text-sm text-muted-foreground">خرجت من صفحة الاختبار أو بدّلت التبويب.</p>
+        </div>
+        <div className="px-6 pb-6 text-center">
+          <p className="text-sm leading-loose mb-4">{detail}</p>
+          <div className={`rounded-lg border px-4 py-3 text-sm font-bold mb-5 ${remaining === 0 ? "border-destructive/60 bg-destructive/10 text-destructive" : "border-border bg-white/5"}`}>
+            {remaining === 0 ? "دي كانت آخر فرصة — أي خروج تاني هيوقفك عن الاختبار فورًا." : `فاضل لك ${remaining} ${remaining === 1 ? "فرصة" : "فرص"} قبل الحظر.`}
+          </div>
+          {notices.length > 1 && <p className="text-xs text-muted-foreground mb-3">اتسجّلت {notices.length} مخالفات من آخر مرة.</p>}
+          <button type="button" onClick={onClose} className="btn-gold ripple w-full">فهمت، كمّل الاختبار</button>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -368,7 +455,7 @@ function ExamRunner({
   data, onBlocked, onDone,
 }: {
   data: Started;
-  onBlocked: (code: string, message: string) => void;
+  onBlocked: (code: string, message: string, extra?: { reason?: string | null; used?: number; total?: number }) => void;
   onDone: (message: string) => void;
 }) {
   const [answers, setAnswers] = useState<Record<string, string>>(data.answers ?? {});
@@ -382,9 +469,18 @@ function ExamRunner({
   const [submitError, setSubmitError] = useState("");
   const activeQidRef = useRef<string | null>(null);
   // ---- الشكل الجديد ----
+  const [questions, setQuestions] = useState<ServedQuestion[]>(data.questions);
+  const questionsRef = useRef(questions);
+  const [zeroed, setZeroed] = useState<string[]>([]);
+  const [used, setUsed] = useState(0); // الفرص اللي ضاعت
+  const [warns, setWarns] = useState<ViolationNotice[] | null>(null);
+  const seenRef = useRef(0);
+  const curRef = useRef(0);
+  const vidRef = useRef("");
   const isNew = data.view === "new";
   const oneAtATime = isNew && data.layout !== "all";
   const [cur, setCur] = useState(0);
+  useEffect(() => { curRef.current = cur; }, [cur]);
   const [lastSaved, setLastSaved] = useState<number | null>(null);
   const [saveFailed, setSaveFailed] = useState(false);
   const flagKey = `exam-flags-${data.attemptId}`;
@@ -419,23 +515,59 @@ function ExamRunner({
 
   // نتائج أي نداء للسيرفر
   const handleServerState = useCallback((r: Awaited<ReturnType<typeof saveAnswersFn>>) => {
+    if (r.state === "ok") {
+      setUsed(r.used);
+      if (r.notices.length) {
+        seenRef.current = r.notice_count;
+        if (r.questions) { questionsRef.current = r.questions; setQuestions(r.questions); }
+        if (r.zeroed) setZeroed(r.zeroed);
+        const gone = r.notices.flatMap((n) => (n.qid ? [n.qid] : []));
+        if (gone.length) {
+          setAnswers((prev) => { const next = { ...prev }; for (const g of gone) delete next[g]; answersRef.current = next; return next; });
+          setImages((prev) => { const next = { ...prev }; for (const g of gone) delete next[g]; return next; });
+        }
+        // سؤال اتصفّر وإنت واقف عليه (سؤال سؤال): انقل للي بعده
+        const z = r.notices.filter((n) => n.kind === "zero").map((n) => n.qid);
+        const here = questionsRef.current[curRef.current]?.id;
+        if (here && z.includes(here) && r.zeroed) {
+          const list = questionsRef.current;
+          const after = list.findIndex((q, i) => i > curRef.current && !r.zeroed!.includes(q.id));
+          const before = list.findIndex((q, i) => i < curRef.current && !r.zeroed!.includes(q.id));
+          const to = after >= 0 ? after : before;
+          if (to >= 0) setCur(to);
+        }
+        setWarns((p) => [...(p ?? []), ...r.notices]);
+      }
+      return false;
+    }
     if (r.state === "submitted") { finish(r.message); return true; }
     if (r.state === "blocked") {
       finishedRef.current = true;
       leftPendingRef.current = false;
       try { localStorage.removeItem(`exam-left-${data.attemptId}`); } catch { /* ignore */ }
-      onBlocked(r.code, r.message);
+      onBlocked(r.code, r.message, { reason: r.reason, used: r.used, total: r.total });
       return true;
     }
     if (r.state === "invalid") { finishedRef.current = true; onDone("انتهت هذه المحاولة."); return true; }
     return false;
   }, [finish, onBlocked, onDone]);
 
+  // السؤال اللي واقف عليه الطالب (للتبديل)
+  const currentQid = () => (oneAtATime ? questionsRef.current[curRef.current]?.id : activeQidRef.current ?? undefined);
+
   const save = useCallback(async (final = false) => {
     dirtyRef.current = false;
-    return saveAnswersFn({
-      data: { attemptId: data.attemptId, token: data.token, answers: answersRef.current, final, left: leftPendingRef.current },
+    const sentVid = leftPendingRef.current ? vidRef.current : "";
+    const r = await saveAnswersFn({
+      data: { attemptId: data.attemptId, token: data.token, answers: answersRef.current, final, left: sentVid || undefined, cur: currentQid(), seen: seenRef.current },
     });
+    // السيرفر استلم المخالفة (اتحسبت كفرصة/تحذير) → نشيل العلامة المحلية
+    if (r.state === "ok" && sentVid && vidRef.current === sentVid) {
+      leftPendingRef.current = false;
+      leftRef.current = false;
+      try { localStorage.removeItem(`exam-left-${data.attemptId}`); } catch { /* ignore */ }
+    }
+    return r;
   }, [data.attemptId, data.token]);
 
   // حفظ تلقائي + نبض كل 4 ثواني
@@ -469,6 +601,7 @@ function ExamRunner({
       if (finishedRef.current) return;
       const body = JSON.stringify({
         attemptId: data.attemptId, token: data.token, reason, answers: answersRef.current,
+        vid: reason === "tab_switch" ? vidRef.current : undefined, cur: currentQid(),
       });
       try {
         if (!navigator.sendBeacon("/api/exam-leave", new Blob([body], { type: "text/plain" }))) throw new Error();
@@ -480,13 +613,14 @@ function ExamRunner({
     // أي خروج من النافذة بيتسجّل فورًا ومحليًا (حتى لو الشبكة واقعة أو البلاغ اتحجب)،
     // وبيتبعت مع كل نبضة لحد ما السيرفر يأكد الحظر.
     const storeKey = `exam-left-${data.attemptId}`;
-    try { if (localStorage.getItem(storeKey)) leftPendingRef.current = true; } catch { /* ignore */ }
+    try { const v = localStorage.getItem(storeKey); if (v) { leftPendingRef.current = true; vidRef.current = v; } } catch { /* ignore */ }
     const violation = () => {
       if (!data.block_on_tab_switch || finishedRef.current) return;
       leftRef.current = true;
       if (!leftPendingRef.current) {
         leftPendingRef.current = true;
-        try { localStorage.setItem(storeKey, String(Date.now())); } catch { /* ignore */ }
+        vidRef.current = `v${Date.now()}`;
+        try { localStorage.setItem(storeKey, vidRef.current); } catch { /* ignore */ }
         beacon("tab_switch");
       }
       // إعادة المحاولة فورًا من غير ما ننتظر النبضة الجاية
@@ -546,7 +680,7 @@ function ExamRunner({
   const imgQuery = `attemptId=${encodeURIComponent(data.attemptId)}&token=${encodeURIComponent(data.token)}`;
 
   const uploadImage = useCallback(async (qid: string, file: Blob) => {
-    const q = data.questions.find((x) => x.id === qid);
+    const q = questions.find((x) => x.id === qid);
     if (!q || q.image_mode === "none") return;
     setImgErr((p) => ({ ...p, [qid]: "" }));
     setImgBusy((p) => ({ ...p, [qid]: true }));
@@ -566,7 +700,7 @@ function ExamRunner({
     } finally {
       setImgBusy((p) => ({ ...p, [qid]: false }));
     }
-  }, [data.questions, imgQuery, handleServerState]);
+  }, [questions, imgQuery, handleServerState]);
 
   const removeImage = async (qid: string, name: string) => {
     setImgErr((p) => ({ ...p, [qid]: "" }));
@@ -588,7 +722,7 @@ function ExamRunner({
       const file = item.getAsFile();
       if (!file) return;
       e.preventDefault();
-      const imgQs = data.questions.filter((q) => q.image_mode !== "none");
+      const imgQs = questions.filter((q) => q.image_mode !== "none");
       let qid = activeQidRef.current;
       if (!qid || !imgQs.some((q) => q.id === qid)) qid = imgQs.length === 1 ? imgQs[0].id : null;
       if (!qid) {
@@ -600,12 +734,12 @@ function ExamRunner({
     };
     document.addEventListener("paste", onPaste);
     return () => document.removeEventListener("paste", onPaste);
-  }, [data.questions, uploadImage]);
+  }, [questions, uploadImage]);
 
   const askConfirm = () => {
-    const missing = data.questions
+    const missing = questions
       .map((q, i) => ({ q, i }))
-      .filter(({ q }) => q.image_mode === "required" && !(images[q.id]?.length));
+      .filter(({ q }) => q.image_mode === "required" && !(images[q.id]?.length) && !zeroed.includes(q.id));
     if (missing.length) {
       setSubmitError(`لازم ترفق صورة في السؤال: ${missing.map((m) => m.i + 1).join("، ")}`);
       return;
@@ -634,7 +768,8 @@ function ExamRunner({
   };
 
   const isAnswered = (q: ServedQuestion) => !!((answers[q.id] ?? "").trim() || (images[q.id]?.length ?? 0) > 0);
-  const answered = data.questions.filter(isAnswered).length;
+  const answered = questions.filter(isAnswered).length;
+  const unanswered = questions.filter((q) => !isAnswered(q) && !zeroed.includes(q.id)).length;
 
   const toggleFlag = (qid: string) => {
     setFlags((p) => {
@@ -647,13 +782,13 @@ function ExamRunner({
 
   // التنقل: بنحفظ الإجابات عند كل انتقال
   const goTo = useCallback((i: number) => {
-    const n = data.questions.length;
+    const n = questions.length;
     if (i < 0 || i >= n) return;
     if (!data.allow_back && oneAtATime && i < cur) return;
     void save().then((r) => { handleServerState(r); setLastSaved(Date.now()); setSaveFailed(false); }).catch(() => setSaveFailed(true));
     if (oneAtATime) { setCur(i); window.scrollTo?.({ top: 0 }); document.querySelector(".exam-root")?.scrollTo?.({ top: 0 }); }
     else { setCur(i); document.getElementById(`exam-q-${i}`)?.scrollIntoView({ behavior: "smooth", block: "start" }); }
-  }, [data.questions.length, data.allow_back, oneAtATime, cur, save, handleServerState]);
+  }, [questions.length, data.allow_back, oneAtATime, cur, save, handleServerState]);
 
   // أسهم الكيبورد (RTL: السهم الشمال = التالي) — مش بتشتغل وإنت بتكتب
   useEffect(() => {
@@ -689,7 +824,7 @@ function ExamRunner({
         <div className="rounded-xl border border-[var(--gold)]/50 bg-[var(--gold)]/10 p-4">
           <p className="mb-3 text-sm">
             متأكد إنك عايز تسلّم؟ مش هتقدر تعدّل بعد كده
-            {answered < data.questions.length && ` (لسه ${data.questions.length - answered} سؤال من غير إجابة)`}
+            {unanswered > 0 && ` (لسه ${unanswered} سؤال من غير إجابة)`}
             {Object.keys(flags).length > 0 && ` (و${Object.keys(flags).length} سؤال معلّم للمراجعة)`}.
           </p>
           <div className="flex gap-2">
@@ -704,14 +839,26 @@ function ExamRunner({
   );
 
   const qProps = (q: ServedQuestion, i: number) => ({
-    index: i + 1, q, value: answers[q.id] ?? "", onChange: (v: string) => setAnswer(q.id, v), clip: blockClip,
+    index: i + 1, q, zeroed: zeroed.includes(q.id), value: answers[q.id] ?? "", onChange: (v: string) => setAnswer(q.id, v), clip: blockClip,
     images: images[q.id] ?? [], busy: !!imgBusy[q.id], error: imgErr[q.id] ?? "",
     onActive: () => { activeQidRef.current = q.id; },
     onAttach: (f: File) => uploadImage(q.id, f), onRemove: (n: string) => removeImage(q.id, n),
   });
 
+  const chancesBadge = data.block_on_tab_switch && data.tab_chances > 0 ? (
+    <div className="text-xs inline-flex items-center gap-1.5 text-muted-foreground" title="فرص تبديل التاب قبل الحظر">
+      فرصك
+      <span className="inline-flex gap-1">
+        {Array.from({ length: data.tab_chances }, (_, i) => (
+          <span key={i} className={`h-2.5 w-2.5 rounded-full ${i < used ? "bg-destructive/40" : "bg-emerald-500"}`} />
+        ))}
+      </span>
+    </div>
+  ) : null;
+
   const overlays = (
     <>
+      {warns && warns.length > 0 && <ViolationModal notices={warns} onClose={() => setWarns(null)} />}
       {notice && (
         <div className="fixed bottom-6 inset-x-0 z-30 flex justify-center px-4 pointer-events-none">
           <div className="rounded-lg border border-[var(--gold)]/50 bg-background px-4 py-2 text-sm shadow-lg">{notice}</div>
@@ -729,15 +876,15 @@ function ExamRunner({
   );
 
   if (isNew) {
-    const total = data.questions.length;
+    const total = questions.length;
     const flaggedCount = Object.keys(flags).length;
     const pct = total ? Math.round((answered / total) * 100) : 0;
-    const q = data.questions[cur];
+    const q = questions[cur];
     const lockedBack = !data.allow_back && oneAtATime;
     // ترقيم الأسئلة: دواير صغيرة (مش مربعات). الحالي أكبر وعليه حلقة، والمعلّم للمراجعة عليه نقطة برتقالي.
     const dots = (
       <div className={oneAtATime ? "flex flex-wrap justify-center gap-2" : "flex flex-wrap gap-2"}>
-        {data.questions.map((x, i) => {
+        {questions.map((x, i) => {
           const done = isAnswered(x);
           const on = i === cur;
           const disabled = lockedBack && i < cur;
@@ -747,7 +894,7 @@ function ExamRunner({
               title={`سؤال ${i + 1}${flags[x.id] ? " — معلّم للمراجعة" : ""}${done ? " — تمت الإجابة" : ""}`}
               className={`relative h-9 w-9 rounded-full text-sm font-bold transition-all disabled:opacity-35 disabled:cursor-not-allowed
                 ${on ? "scale-110 ring-2 ring-[var(--gold)] ring-offset-2 ring-offset-background" : ""}
-                ${done ? "bg-[var(--gold)] text-[oklch(0.15_0.02_80)]" : "border border-border text-muted-foreground hover:border-[var(--gold)] hover:text-foreground"}`}
+                ${zeroed.includes(x.id) ? "bg-destructive/30 text-destructive line-through" : done ? "bg-[var(--gold)] text-[oklch(0.15_0.02_80)]" : "border border-border text-muted-foreground hover:border-[var(--gold)] hover:text-foreground"}`}
             >
               {i + 1}
               {flags[x.id] && <span className="absolute -top-0.5 -right-0.5 h-3 w-3 rounded-full bg-orange-500 border-2 border-background" />}
@@ -777,6 +924,7 @@ function ExamRunner({
           <div className="font-bold gold-text text-lg ml-auto">{data.title}</div>
           {personalLeft !== null && <TimerBadge label="وقتك" ms={personalLeft} danger={personalLeft < 300_000} />}
           {generalLeft !== null && <TimerBadge label="وقت الاختبار" ms={generalLeft} danger={generalLeft < 300_000} general />}
+          {chancesBadge}
           <div className={`text-xs inline-flex items-center gap-1 ${saveFailed ? "text-destructive" : "text-muted-foreground"}`}>
             {saveFailed ? "تعذّر الحفظ — بنعيد المحاولة" : lastSaved ? <><CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />تم الحفظ</> : "الحفظ تلقائي"}
           </div>
@@ -833,7 +981,7 @@ function ExamRunner({
             <div className="hidden lg:block mt-4">{submitBlock}</div>
           </aside>
           <div className="min-w-0 space-y-6">
-            {data.questions.map((x, i) => (
+            {questions.map((x, i) => (
               <div key={x.id} id={`exam-q-${i}`} className="scroll-mt-28">
                 <QuestionCard {...qProps(x, i)} roomy />
                 <div className="mt-2">{flagBtn(x.id)}</div>
@@ -860,12 +1008,13 @@ function ExamRunner({
           {generalLeft !== null && (
             <TimerBadge label="وقت الاختبار" ms={generalLeft} danger={generalLeft < 60_000} general />
           )}
-          <div className="text-xs text-muted-foreground">{answered}/{data.questions.length} تمت الإجابة</div>
+          {chancesBadge}
+          <div className="text-xs text-muted-foreground">{answered}/{questions.length} تمت الإجابة</div>
         </div>
       </div>
 
       <div className="max-w-3xl mx-auto px-4 py-8 space-y-5 select-none">
-        {data.questions.map((q, i) => (
+        {questions.map((q, i) => (
           <QuestionCard
             key={q.id} index={i + 1} q={q} value={answers[q.id] ?? ""} onChange={(v) => setAnswer(q.id, v)} clip={blockClip}
             images={images[q.id] ?? []} busy={!!imgBusy[q.id]} error={imgErr[q.id] ?? ""}
@@ -894,9 +1043,10 @@ function TimerBadge({ label, ms, danger, general }: { label: string; ms: number;
 }
 
 function QuestionCard({
-  index, q, value, onChange, clip, images, busy, error, onActive, onAttach, onRemove, roomy,
+  index, q, value, onChange, clip, images, busy, error, onActive, onAttach, onRemove, roomy, zeroed,
 }: {
   roomy?: boolean;
+  zeroed?: boolean;
   index: number;
   q: ServedQuestion;
   value: string;
@@ -914,10 +1064,16 @@ function QuestionCard({
   return (
     <div
       className={`rounded-2xl border border-border bg-card/80 ${roomy ? "p-6 md:p-8 min-h-[45vh] text-base md:text-lg" : "p-5 rounded-xl"}`}
-      onFocusCapture={canImage ? onActive : undefined}
+      onFocusCapture={onActive}
       onMouseEnter={canImage ? onActive : undefined}
-      onClick={canImage ? onActive : undefined}
+      onClick={onActive}
     >
+      {zeroed && (
+        <div className="mb-4 rounded-lg border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm text-destructive font-bold flex items-center gap-2">
+          <Ban className="h-4 w-4 shrink-0" />اتصفّر السؤال ده تلقائيًا بسبب مخالفة تبديل التبويب — كمّل على اللي بعده.
+        </div>
+      )}
+      <div className={zeroed ? "pointer-events-none opacity-40" : ""}>
       <div className={`flex gap-3 ${roomy ? "mb-6" : "mb-4"}`}>
         <div className={`shrink-0 rounded-full bg-[var(--gold)]/20 text-[var(--gold)] font-bold flex items-center justify-center ${roomy ? "h-9 w-9 text-base" : "h-7 w-7 text-sm"}`}>{index}</div>
         {q.type === "fix" ? <div className="font-semibold leading-loose text-[var(--gold)]">علّم الكلمات أو الأسطر الغلط في الجملة دي وصحّحها:</div> : <div className="font-semibold leading-loose whitespace-pre-wrap">{q.text}</div>}
@@ -1027,6 +1183,7 @@ function QuestionCard({
           )}
         </div>
       )}
+      </div>
     </div>
   );
 }

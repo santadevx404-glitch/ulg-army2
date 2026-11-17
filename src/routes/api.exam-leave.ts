@@ -13,10 +13,12 @@ export const Route = createFileRoute("/api/exam-leave")({
             token?: string;
             reason?: BlockReason;
             answers?: Record<string, string>;
+            vid?: string;
+            cur?: string;
           };
           if (!body.attemptId || !body.token) return new Response("bad request", { status: 400 });
           const reason: BlockReason = body.reason === "tab_switch" ? "tab_switch" : "leave";
-          await reportLeave(body.attemptId, body.token, reason, body.answers);
+          await reportLeave(body.attemptId, body.token, reason, body.answers, body.vid, body.cur);
           return new Response("ok");
         } catch {
           return new Response("bad request", { status: 400 });

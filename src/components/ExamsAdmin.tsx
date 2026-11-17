@@ -73,6 +73,8 @@ export function ExamsAdmin() {
           attempt_minutes: editing.attempt_minutes ? Number(editing.attempt_minutes) : null,
           ends_at: editing.ends_at ?? null,
           block_on_tab_switch: editing.block_on_tab_switch ?? false,
+          tab_chances: Number(editing.tab_chances) || 0,
+          tab_actions: Array.from({ length: Number(editing.tab_chances) || 0 }, (_, i) => editing.tab_actions?.[i] ?? "warn"),
           exam_view: editing.exam_view ?? "classic",
           exam_layout: editing.exam_layout ?? "one",
           allow_back: editing.allow_back ?? true,
@@ -117,7 +119,7 @@ export function ExamsAdmin() {
 
   return (
     <div>
-      {can("exams.create") && <button onClick={() => openEdit({ published: false, shuffle: true, optional_count: 0 })} className="btn-gold ripple mb-6 inline-flex items-center gap-2">
+      {can("exams.create") && <button onClick={() => openEdit({ published: false, shuffle: true, optional_count: 0, tab_chances: 0, tab_actions: [] })} className="btn-gold ripple mb-6 inline-flex items-center gap-2">
         <Plus className="h-4 w-4" />اختبار جديد
       </button>}
 
@@ -185,8 +187,59 @@ export function ExamsAdmin() {
           <div className="flex flex-wrap gap-6 mb-4">
             <label className="flex items-center gap-2"><input type="checkbox" disabled={lk("publish")} checked={editing.published ?? false} onChange={(e) => setEditing({ ...editing, published: e.target.checked })} />منشور</label>
             <label className="flex items-center gap-2"><input type="checkbox" disabled={lk("options")} checked={editing.shuffle ?? true} onChange={(e) => setEditing({ ...editing, shuffle: e.target.checked })} />ترتيب الأسئلة والاختيارات عشوائي</label>
-            <label className="flex items-center gap-2"><input type="checkbox" disabled={lk("options")} checked={editing.block_on_tab_switch ?? false} onChange={(e) => setEditing({ ...editing, block_on_tab_switch: e.target.checked })} />حظر لو بدّل التاب</label>
+            <label className="flex items-center gap-2"><input type="checkbox" disabled={lk("options")} checked={editing.block_on_tab_switch ?? false} onChange={(e) => setEditing({ ...editing, block_on_tab_switch: e.target.checked })} />حماية تبديل التاب</label>
           </div>
+
+          {editing.block_on_tab_switch && (
+            <div className="rounded-lg border border-border p-4 mb-4">
+              <Field
+                locked={lk("options")}
+                label="عدد الفرص قبل الحظر"
+                hint="كل مرة الطالب بيبدّل فيها التاب بتضيع منه فرصة ويتاخد عليه إجراء. لما الفرص تخلص بيتحظر. 0 = حظر فوري من أول مرة."
+              >
+                <input
+                  type="number" min={0} max={20} className="input max-w-32"
+                  value={editing.tab_chances ?? 0}
+                  onChange={(e) => {
+                    const n = Math.min(20, Math.max(0, parseInt(e.target.value) || 0));
+                    setEditing({ ...editing, tab_chances: n, tab_actions: Array.from({ length: n }, (_, i) => editing.tab_actions?.[i] ?? "warn") });
+                  }}
+                />
+              </Field>
+              {(editing.tab_chances ?? 0) > 0 && (
+                <>
+                  <div className="flex flex-wrap items-center gap-2 mb-3 text-sm">
+                    <span className="text-muted-foreground">تطبيق على كل الفرص:</span>
+                    {([["warn", "تحذير فقط"], ["swap", "تحذير + تبديل السؤال"]] as const).map(([v, label]) => (
+                      <button
+                        key={v} type="button" disabled={lk("options")}
+                        onClick={() => setEditing({ ...editing, tab_actions: Array.from({ length: editing.tab_chances ?? 0 }, () => v) })}
+                        className="px-3 py-1 rounded-full border border-border hover:border-[var(--gold)] disabled:opacity-50"
+                      >{label}</button>
+                    ))}
+                  </div>
+                  <div className="space-y-2">
+                    {Array.from({ length: editing.tab_chances ?? 0 }, (_, i) => (
+                      <div key={i} className="flex items-center gap-3">
+                        <span className="w-24 shrink-0 text-sm">المخالفة {i + 1}</span>
+                        <select
+                          className="input" disabled={lk("options")} value={editing.tab_actions?.[i] ?? "warn"}
+                          onChange={(e) => setEditing({ ...editing, tab_actions: Array.from({ length: editing.tab_chances ?? 0 }, (_, k) => (k === i ? (e.target.value as "warn" | "swap") : (editing.tab_actions?.[k] ?? "warn"))) })}
+                        >
+                          <option value="warn">تحذير فقط</option>
+                          <option value="swap">تحذير + تبديل السؤال اللي واقف عليه بسؤال تاني (لو مفيش بديل: صفر تلقائي وينتقل للي بعده)</option>
+                        </select>
+                      </div>
+                    ))}
+                    <div className="flex items-center gap-3">
+                      <span className="w-24 shrink-0 text-sm text-destructive font-bold">المخالفة {(editing.tab_chances ?? 0) + 1}</span>
+                      <div className="text-sm text-destructive">حظر الطالب وإعطاؤه كود حظر</div>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
 
           <div className="rounded-lg border border-border p-4 mb-4">
             <Field label="شكل شاشة الاختبار" locked={lk("exam_view")} hint="الجديد: سؤال واحد في الشاشة + شريط أرقام + تعليم للمراجعة + حفظ تلقائي. القديم: كل الأسئلة تحت بعض.">
@@ -581,6 +634,8 @@ function AttemptRow({ a, children }: { a: AdminAttemptRow; children?: React.Reac
         <div className="text-xs text-muted-foreground mt-1">
           {a.exam_title} • محاولة {a.attempt_no} • {(a.status === "submitted" || a.status === "retired") && (a.graded ? <span className="text-emerald-500 font-bold">{a.score}/{a.max} </span> : <span className="text-amber-500">لسه مصححش • </span>)}<span className={a.status === "blocked" ? "text-destructive" : a.status === "submitted" ? "text-[var(--gold)]" : ""}>{statusLabel[a.status]}</span>
           {a.block_code && <> • <span dir="ltr" className="font-mono">{a.block_code}</span></>}
+          {a.violations > 0 && <> • <span className="text-orange-500">مخالفات {a.violations}</span></>}
+          {a.zeroed > 0 && <> • <span className="text-destructive">{a.zeroed} سؤال اتصفّر</span></>}
         </div>
         <div className="text-xs text-muted-foreground">
           جاوب {a.answered}/{a.total} • بدأ {fmt(a.started_at)}
