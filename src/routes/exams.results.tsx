@@ -126,7 +126,7 @@ function Summary({ r }: { r: MyResult }) {
         ) : (
           <div className="flex flex-wrap gap-2">
             {review.map(({ it, n }) => (
-              <span key={it.id} className={`h-8 min-w-8 px-2 rounded-lg border text-sm font-bold inline-flex items-center justify-center ${V[it.verdict].box} ${V[it.verdict].text}`}>{n}</span>
+              <span key={it.id} className={`h-8 min-w-8 px-2 rounded-full border text-sm font-bold inline-flex items-center justify-center ${V[it.verdict].box} ${V[it.verdict].text}`}>{n}</span>
             ))}
           </div>
         )}
@@ -141,12 +141,12 @@ function NewReview({ items }: { items: MyResult["items"] }) {
   const it = items[cur];
   if (!it) return null;
   return (
-    <div className="lg:grid lg:grid-cols-[12rem_minmax(0,1fr)] lg:gap-4">
-      <div className="grid grid-cols-8 sm:grid-cols-10 lg:grid-cols-4 gap-2 content-start mb-4 lg:mb-0">
+    <div className="lg:grid lg:grid-cols-[11rem_minmax(0,1fr)] lg:gap-4">
+      <div className="flex flex-wrap gap-2 content-start mb-4 lg:mb-0">
         {items.map((x, i) => (
           <button
             key={x.id} type="button" onClick={() => setCur(i)}
-            className={`h-9 rounded-lg border text-sm font-bold ${V[x.verdict].box} ${V[x.verdict].text} ${i === cur ? "ring-2 ring-[var(--gold)]" : ""}`}
+            className={`h-9 w-9 rounded-full border text-sm font-bold ${V[x.verdict].box} ${V[x.verdict].text} ${i === cur ? "ring-2 ring-[var(--gold)]" : ""}`}
           >{i + 1}</button>
         ))}
       </div>

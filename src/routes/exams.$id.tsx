@@ -734,93 +734,112 @@ function ExamRunner({
     const pct = total ? Math.round((answered / total) * 100) : 0;
     const q = data.questions[cur];
     const lockedBack = !data.allow_back && oneAtATime;
-    const rail = (
-      <div className="rounded-xl border border-border bg-card/80 p-4">
-        <div className="flex items-center justify-between mb-3 text-sm">
-          <span className="font-bold">الأسئلة</span>
-          <span className="text-xs text-muted-foreground">{answered}/{total}</span>
-        </div>
-        <div className="grid grid-cols-6 sm:grid-cols-8 lg:grid-cols-5 gap-2">
-          {data.questions.map((x, i) => {
-            const done = isAnswered(x);
-            const fl = !!flags[x.id];
-            const on = i === cur;
-            const disabled = lockedBack && i < cur;
-            return (
-              <button
-                key={x.id} type="button" disabled={disabled} onClick={() => goTo(i)}
-                title={`سؤال ${i + 1}${fl ? " — معلّم للمراجعة" : ""}${done ? " — تمت الإجابة" : ""}`}
-                className={`relative h-10 rounded-lg border text-sm font-bold transition disabled:opacity-40 disabled:cursor-not-allowed
-                  ${on ? "ring-2 ring-[var(--gold)] ring-offset-2 ring-offset-background" : ""}
-                  ${done ? "bg-[var(--gold)] border-[var(--gold)] text-[oklch(0.15_0.02_80)]" : "border-border hover:bg-white/5"}`}
-              >
-                {i + 1}
-                {fl && <Flag className="absolute -top-1.5 -right-1.5 h-4 w-4 text-orange-500 fill-orange-500" />}
-              </button>
-            );
-          })}
-        </div>
-        <div className="mt-4 space-y-1.5 text-xs text-muted-foreground">
-          <div className="flex items-center gap-2"><span className="h-3 w-3 rounded bg-[var(--gold)]" />تمت الإجابة</div>
-          <div className="flex items-center gap-2"><span className="h-3 w-3 rounded border border-border" />لم تُجب بعد</div>
-          <div className="flex items-center gap-2"><Flag className="h-3 w-3 text-orange-500 fill-orange-500" />معلّم للمراجعة ({flaggedCount})</div>
-        </div>
+    // ترقيم الأسئلة: دواير صغيرة (مش مربعات). الحالي أكبر وعليه حلقة، والمعلّم للمراجعة عليه نقطة برتقالي.
+    const dots = (
+      <div className={oneAtATime ? "flex flex-wrap justify-center gap-2" : "flex flex-wrap gap-2"}>
+        {data.questions.map((x, i) => {
+          const done = isAnswered(x);
+          const on = i === cur;
+          const disabled = lockedBack && i < cur;
+          return (
+            <button
+              key={x.id} type="button" disabled={disabled} onClick={() => goTo(i)}
+              title={`سؤال ${i + 1}${flags[x.id] ? " — معلّم للمراجعة" : ""}${done ? " — تمت الإجابة" : ""}`}
+              className={`relative h-9 w-9 rounded-full text-sm font-bold transition-all disabled:opacity-35 disabled:cursor-not-allowed
+                ${on ? "scale-110 ring-2 ring-[var(--gold)] ring-offset-2 ring-offset-background" : ""}
+                ${done ? "bg-[var(--gold)] text-[oklch(0.15_0.02_80)]" : "border border-border text-muted-foreground hover:border-[var(--gold)] hover:text-foreground"}`}
+            >
+              {i + 1}
+              {flags[x.id] && <span className="absolute -top-0.5 -right-0.5 h-3 w-3 rounded-full bg-orange-500 border-2 border-background" />}
+            </button>
+          );
+        })}
+      </div>
+    );
+    const legend = (
+      <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-1 text-xs text-muted-foreground">
+        <span className="inline-flex items-center gap-1.5"><span className="h-3 w-3 rounded-full bg-[var(--gold)]" />تمت الإجابة</span>
+        <span className="inline-flex items-center gap-1.5"><span className="h-3 w-3 rounded-full border border-border" />لم تُجب</span>
+        <span className="inline-flex items-center gap-1.5"><span className="h-3 w-3 rounded-full bg-orange-500" />للمراجعة ({flaggedCount})</span>
       </div>
     );
 
-    const navBar = oneAtATime && (
-      <div className="mt-5 flex flex-wrap items-center gap-3">
-        {!lockedBack && cur > 0 && (
-          <button type="button" onClick={() => goTo(cur - 1)} className="inline-flex items-center gap-1 px-4 py-2 rounded-lg border border-border hover:border-[var(--gold)]"><ChevronRight className="h-4 w-4" />السابق</button>
-        )}
-        <button
-          type="button" onClick={() => toggleFlag(q.id)}
-          className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg border transition ${flags[q.id] ? "border-orange-500 bg-orange-500/15 text-orange-500" : "border-border hover:border-orange-500/60"}`}
-        ><Flag className={`h-4 w-4 ${flags[q.id] ? "fill-orange-500" : ""}`} />{flags[q.id] ? "شيل علامة المراجعة" : "علّم للمراجعة"}</button>
-        {cur < total - 1 && (
-          <button type="button" onClick={() => goTo(cur + 1)} className="mr-auto btn-gold ripple inline-flex items-center gap-1">التالي<ChevronLeft className="h-4 w-4" /></button>
-        )}
+    const flagBtn = (id: string) => (
+      <button
+        type="button" onClick={() => toggleFlag(id)}
+        className={`inline-flex items-center gap-2 px-4 py-2 rounded-full border text-sm transition ${flags[id] ? "border-orange-500 bg-orange-500/15 text-orange-500" : "border-border hover:border-orange-500/60"}`}
+      ><Flag className={`h-4 w-4 ${flags[id] ? "fill-orange-500" : ""}`} />{flags[id] ? "شيل علامة المراجعة" : "علّم للمراجعة"}</button>
+    );
+
+    const header = (
+      <div className="sticky top-0 z-10 border-b border-border bg-background/95 backdrop-blur">
+        <div className="max-w-5xl mx-auto px-4 py-3 flex flex-wrap items-center gap-x-5 gap-y-2">
+          <div className="font-bold gold-text text-lg ml-auto">{data.title}</div>
+          {personalLeft !== null && <TimerBadge label="وقتك" ms={personalLeft} danger={personalLeft < 300_000} />}
+          {generalLeft !== null && <TimerBadge label="وقت الاختبار" ms={generalLeft} danger={generalLeft < 300_000} general />}
+          <div className={`text-xs inline-flex items-center gap-1 ${saveFailed ? "text-destructive" : "text-muted-foreground"}`}>
+            {saveFailed ? "تعذّر الحفظ — بنعيد المحاولة" : lastSaved ? <><CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />تم الحفظ</> : "الحفظ تلقائي"}
+          </div>
+        </div>
+        <div className="h-1 bg-border"><div className="h-full bg-[var(--gold)] transition-all" style={{ width: `${pct}%` }} /></div>
       </div>
     );
 
+    if (oneAtATime) {
+      return createPortal(
+        <div className="exam-root fixed inset-0 z-[70] overflow-y-auto bg-background">
+          {header}
+          <div className="max-w-4xl mx-auto px-4 py-6 md:py-8 select-none">
+            <div className="mb-3">{dots}</div>
+            <div className="mb-6">{legend}</div>
+
+            <div className="flex items-center justify-between mb-3 text-sm text-muted-foreground">
+              <span>سؤال <b className="text-foreground">{cur + 1}</b> من {total}</span>
+              <span className="flex items-center gap-3">
+                {q.points ? <span>{q.points} درجة</span> : null}
+                <span>{answered}/{total} تمت الإجابة</span>
+              </span>
+            </div>
+
+            <QuestionCard key={q.id} {...qProps(q, cur)} roomy />
+
+            <div className="mt-6 flex flex-wrap items-center gap-3">
+              {!lockedBack && cur > 0 ? (
+                <button type="button" onClick={() => goTo(cur - 1)} className="inline-flex items-center gap-1 px-5 py-2.5 rounded-full border border-border hover:border-[var(--gold)]"><ChevronRight className="h-4 w-4" />السابق</button>
+              ) : <span />}
+              <div className="mx-auto">{flagBtn(q.id)}</div>
+              {cur < total - 1 ? (
+                <button type="button" onClick={() => goTo(cur + 1)} className="btn-gold ripple inline-flex items-center gap-1 rounded-full">التالي<ChevronLeft className="h-4 w-4" /></button>
+              ) : <span />}
+            </div>
+
+            <div className="mt-10 pt-6 border-t border-border max-w-xl mx-auto">{submitBlock}</div>
+          </div>
+          {overlays}
+        </div>,
+        document.body,
+      );
+    }
+
+    // كل الأسئلة في صفحة: القايمة الجانبية بدواير + الأسئلة تحت بعض
     return createPortal(
       <div className="exam-root fixed inset-0 z-[70] overflow-y-auto bg-background">
-        <div className="sticky top-0 z-10 border-b border-border bg-background/95 backdrop-blur">
-          <div className="max-w-6xl mx-auto px-4 py-3 flex flex-wrap items-center gap-x-5 gap-y-2">
-            <div className="font-bold gold-text text-lg ml-auto">{data.title}</div>
-            {personalLeft !== null && <TimerBadge label="وقتك" ms={personalLeft} danger={personalLeft < 300_000} />}
-            {generalLeft !== null && <TimerBadge label="وقت الاختبار" ms={generalLeft} danger={generalLeft < 300_000} general />}
-            <div className={`text-xs inline-flex items-center gap-1 ${saveFailed ? "text-destructive" : "text-muted-foreground"}`}>
-              {saveFailed ? "تعذّر الحفظ — بنعيد المحاولة" : lastSaved ? <><CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />تم الحفظ</> : "الحفظ تلقائي"}
-            </div>
-          </div>
-          <div className="h-1 bg-border"><div className="h-full bg-[var(--gold)] transition-all" style={{ width: `${pct}%` }} /></div>
-        </div>
-
-        <div className="max-w-6xl mx-auto px-4 py-6 lg:grid lg:grid-cols-[17rem_minmax(0,1fr)] lg:gap-6 lg:items-start select-none">
-          <aside className="mb-5 lg:mb-0 lg:sticky lg:top-24">{rail}<div className="hidden lg:block mt-4">{submitBlock}</div></aside>
-          <div className="min-w-0">
-            {oneAtATime ? (
-              <>
-                <div className="text-xs text-muted-foreground mb-2">سؤال {cur + 1} من {total}{q.points ? ` • ${q.points} درجة` : ""}</div>
-                <QuestionCard key={q.id} {...qProps(q, cur)} />
-                {navBar}
-              </>
-            ) : (
-              <div className="space-y-5">
-                {data.questions.map((x, i) => (
-                  <div key={x.id} id={`exam-q-${i}`} className="scroll-mt-28">
-                    <QuestionCard {...qProps(x, i)} />
-                    <button
-                      type="button" onClick={() => toggleFlag(x.id)}
-                      className={`mt-2 inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border text-sm transition ${flags[x.id] ? "border-orange-500 bg-orange-500/15 text-orange-500" : "border-border hover:border-orange-500/60"}`}
-                    ><Flag className={`h-4 w-4 ${flags[x.id] ? "fill-orange-500" : ""}`} />{flags[x.id] ? "شيل علامة المراجعة" : "علّم للمراجعة"}</button>
-                  </div>
-                ))}
+        {header}
+        <div className="max-w-6xl mx-auto px-4 py-6 lg:grid lg:grid-cols-[15rem_minmax(0,1fr)] lg:gap-8 lg:items-start select-none">
+          <aside className="mb-5 lg:mb-0 lg:sticky lg:top-24 rounded-xl border border-border bg-card/80 p-4">
+            <div className="text-sm font-bold mb-3 flex justify-between"><span>الأسئلة</span><span className="text-xs font-normal text-muted-foreground">{answered}/{total}</span></div>
+            {dots}
+            <div className="mt-4">{legend}</div>
+            <div className="hidden lg:block mt-4">{submitBlock}</div>
+          </aside>
+          <div className="min-w-0 space-y-6">
+            {data.questions.map((x, i) => (
+              <div key={x.id} id={`exam-q-${i}`} className="scroll-mt-28">
+                <QuestionCard {...qProps(x, i)} roomy />
+                <div className="mt-2">{flagBtn(x.id)}</div>
               </div>
-            )}
-            <div className="lg:hidden mt-6">{submitBlock}</div>
-            {oneAtATime && cur === total - 1 && <div className="hidden lg:block mt-6 text-xs text-muted-foreground">دي آخر سؤال — التسليم من الزرار اللي على الجنب.</div>}
+            ))}
+            <div className="lg:hidden">{submitBlock}</div>
           </div>
         </div>
         {overlays}
@@ -875,8 +894,9 @@ function TimerBadge({ label, ms, danger, general }: { label: string; ms: number;
 }
 
 function QuestionCard({
-  index, q, value, onChange, clip, images, busy, error, onActive, onAttach, onRemove,
+  index, q, value, onChange, clip, images, busy, error, onActive, onAttach, onRemove, roomy,
 }: {
+  roomy?: boolean;
   index: number;
   q: ServedQuestion;
   value: string;
@@ -893,13 +913,13 @@ function QuestionCard({
   const canImage = q.image_mode !== "none";
   return (
     <div
-      className="rounded-xl border border-border bg-card/80 p-5"
+      className={`rounded-2xl border border-border bg-card/80 ${roomy ? "p-6 md:p-8 min-h-[45vh] text-base md:text-lg" : "p-5 rounded-xl"}`}
       onFocusCapture={canImage ? onActive : undefined}
       onMouseEnter={canImage ? onActive : undefined}
       onClick={canImage ? onActive : undefined}
     >
-      <div className="flex gap-3 mb-4">
-        <div className="h-7 w-7 shrink-0 rounded-full bg-[var(--gold)]/20 text-[var(--gold)] text-sm font-bold flex items-center justify-center">{index}</div>
+      <div className={`flex gap-3 ${roomy ? "mb-6" : "mb-4"}`}>
+        <div className={`shrink-0 rounded-full bg-[var(--gold)]/20 text-[var(--gold)] font-bold flex items-center justify-center ${roomy ? "h-9 w-9 text-base" : "h-7 w-7 text-sm"}`}>{index}</div>
         {q.type === "fix" ? <div className="font-semibold leading-loose text-[var(--gold)]">علّم الكلمات أو الأسطر الغلط في الجملة دي وصحّحها:</div> : <div className="font-semibold leading-loose whitespace-pre-wrap">{q.text}</div>}
       </div>
 
@@ -912,7 +932,7 @@ function QuestionCard({
                 type="button"
                 key={o}
                 onClick={() => onChange(active ? "" : o)}
-                className={`w-full text-right px-4 py-3 rounded-lg border transition flex items-center gap-3
+                className={`w-full text-right px-4 ${roomy ? "py-4" : "py-3"} rounded-lg border transition flex items-center gap-3
                   ${active ? "border-[var(--gold)] bg-[var(--gold)]/15" : "border-border hover:bg-white/5"}`}
               >
                 <span className={`h-4 w-4 rounded-full border-2 shrink-0 ${active ? "border-[var(--gold)] bg-[var(--gold)]" : "border-muted-foreground"}`} />
@@ -960,7 +980,7 @@ function QuestionCard({
       )}
 
       {q.type === "long" && (
-        <textarea className="input select-text min-h-40" value={value} maxLength={20000} onChange={(e) => onChange(e.target.value)} placeholder="اكتب إجابتك" {...clip} />
+        <textarea className={`input select-text ${roomy ? "min-h-64" : "min-h-40"}`} value={value} maxLength={20000} onChange={(e) => onChange(e.target.value)} placeholder="اكتب إجابتك" {...clip} />
       )}
 
       {canImage && (
