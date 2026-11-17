@@ -76,15 +76,15 @@ const withLock = makeLock();
 function normalizeGallery(g: unknown): GalleryImage[] {
   if (!Array.isArray(g)) return [];
   return g.map((entry) =>
-    typeof entry === "string" ? { url: entry, caption: "" } : { caption: "", ...(entry as GalleryImage) },
+    typeof entry === "string" ? { url: entry, caption: "" } : ({ ...(entry as GalleryImage), caption: (entry as GalleryImage).caption ?? "" }),
   );
 }
 
 async function readDb(): Promise<DB> {
   const parsed = await kvGetJSON<Partial<DB>>(DB_KEY, DEFAULT_DB);
   return {
-    sections: (parsed.sections ?? []).map((s) => ({ password: null, ...s, bypass: normBypass(s.bypass) })),
-    items: (parsed.items ?? []).map((i) => ({ password: null, ...i, course_view: (i as Item).course_view === "page" ? "page" : "classic", bypass: normBypass(i.bypass), gallery: normalizeGallery(i.gallery) }) as Item),
+    sections: (parsed.sections ?? []).map((s) => ({ ...s, password: s.password ?? null, bypass: normBypass(s.bypass) })),
+    items: (parsed.items ?? []).map((i) => ({ ...i, password: i.password ?? null, course_view: (i as Item).course_view === "page" ? "page" : "classic", bypass: normBypass(i.bypass), gallery: normalizeGallery(i.gallery) }) as Item),
     topics: (parsed.topics ?? []).map((t) => ({ ...t, unit: (t as Topic).unit?.trim() || null, images: normalizeGallery((t as any).images) })),
   };
 }

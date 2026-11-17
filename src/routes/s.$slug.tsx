@@ -29,7 +29,7 @@ export const Route = createFileRoute("/s/$slug")({
     };
   },
   component: SectionPage,
-  errorComponent: ({ error }) => <div className="p-8 text-center">{error.message}</div>,
+  errorComponent: ({ error }) => <div className="p-8 text-center">{(error as Error).message}</div>,
   notFoundComponent: () => (
     <div className="p-16 text-center">
       <h1 className="text-3xl gold-text font-bold">القسم غير موجود</h1>

@@ -14,22 +14,25 @@ export const Route = createFileRoute("/s/$slug/$id")({
     if (!item) throw notFound();
     return item;
   },
-  head: ({ loaderData }) => ({
-    meta: [
-      { title: `${loaderData?.title ?? "تفاصيل"} — حرس الحدود` },
-      { name: "description", content: loaderData?.short_description ?? "تفاصيل العنصر" },
-      { property: "og:title", content: `${loaderData?.title ?? "تفاصيل"} — حرس الحدود` },
-      { property: "og:description", content: loaderData?.short_description ?? "تفاصيل العنصر" },
-      ...(loaderData?.cover_image
-        ? [
-            { property: "og:image", content: loaderData.cover_image },
-            { name: "twitter:image", content: loaderData.cover_image },
-          ]
-        : []),
-    ],
-  }),
+  head: ({ loaderData }) => {
+    const d = loaderData && !loaderData.locked ? loaderData : null; // المقفول مفيهوش وصف ولا غلاف
+    return {
+      meta: [
+        { title: `${loaderData?.title ?? "تفاصيل"} — حرس الحدود` },
+        { name: "description", content: d?.short_description ?? "تفاصيل العنصر" },
+        { property: "og:title", content: `${loaderData?.title ?? "تفاصيل"} — حرس الحدود` },
+        { property: "og:description", content: d?.short_description ?? "تفاصيل العنصر" },
+        ...(d?.cover_image
+          ? [
+              { property: "og:image", content: d.cover_image },
+              { name: "twitter:image", content: d.cover_image },
+            ]
+          : []),
+      ],
+    };
+  },
   component: ItemPage,
-  errorComponent: ({ error }) => <div className="p-8 text-center">{error.message}</div>,
+  errorComponent: ({ error }) => <div className="p-8 text-center">{(error as Error).message}</div>,
   notFoundComponent: () => (
     <div className="p-16 text-center">
       <h1 className="text-3xl gold-text font-bold">العنصر غير موجود</h1>
