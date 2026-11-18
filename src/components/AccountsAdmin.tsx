@@ -8,7 +8,7 @@ import {
 import {
   requestsListFn, approveRequestFn, rejectRequestFn, pendingRequestsCountFn,
   membersListFn, setMemberStatusFn, resetMemberPasswordFn, deleteMemberFn, updateMemberDetailsFn, assignMemberFn, setMemberHiddenFn,
-  ranksListFn, saveRankFn, deleteRankFn, reorderRanksFn, permCatalogFn, auditListFn, loginLogFn,
+  ranksListFn, saveRankFn, deleteRankFn, reorderRanksFn, setSelfRanksFn, permCatalogFn, auditListFn, loginLogFn,
   type MemberRow, type RankRow,
 } from "@/lib/account-fns";
 import { covers } from "@/lib/permissions";
@@ -170,6 +170,10 @@ export function MembersAdmin() {
 
   const canRank = can("staff.rank");
   const canGrant = can("staff.grant");
+  // "رتب تحت رتبتي": يقدر يدّي/يشيل بس الرتب اللي تحت أعلى رتبة عنده
+  const canBelowOthers = can("ranks.below.others");
+  const topOrder = me?.top_rank_order ?? null;
+  const rankChangeable = (k: RankRow) => canRank || (canBelowOthers && topOrder !== null && k.order > topOrder);
   const refresh = () => { refetch(); qc.invalidateQueries({ queryKey: ["admin-ranks"] }); };
   const q = search.trim().toLowerCase();
   const list = members.filter((m) => !q || [m.account_name, m.character_name, m.military_code, m.email, ...m.rank_names].some((v) => v.toLowerCase().includes(q)));
@@ -212,7 +216,7 @@ export function MembersAdmin() {
                 )}
                 {m.manageable && (
                   <>
-                    {(canRank || canGrant) && (
+                    {(canRank || canGrant || canBelowOthers) && (
                       <button title="الرتب والصلاحيات" onClick={() => setAssign({ ...m, _grants: m.grants, _denies: m.denies, _ranks: m.rank_ids })} className="p-2 hover:text-[var(--gold)]"><ShieldCheck className="h-4 w-4" /></button>
                     )}
                     {can("accounts.members.edit") && <button title="تعديل البيانات" onClick={() => setDetails(m)} className="p-2 hover:text-[var(--gold)]"><Edit3 className="h-4 w-4" /></button>}
@@ -258,14 +262,14 @@ export function MembersAdmin() {
 
       {assign && (
         <Modal onClose={() => setAssign(null)} title={`الرتب والصلاحيات — ${assign.account_name}`} wide>
-          <Field label="الرتب (ممكن أكتر من رتبة، والصلاحيات بتتجمّع)" hint={canRank ? undefined : "مفيش عندك صلاحية تغيير الرتب."}>
+          <Field label="الرتب (ممكن أكتر من رتبة، والصلاحيات بتتجمّع)" hint={canRank ? undefined : canBelowOthers ? "تقدر تضيف وتشيل بس الرتب اللي تحت أعلى رتبة عندك." : "مفيش عندك صلاحية تغيير الرتب."}>
             <div className="grid gap-1 rounded-lg border border-border p-2 max-h-56 overflow-y-auto">
               {ranks.map((k) => {
-                const ok = canRank && k.permissions.every(allowed);
+                const ok = rankChangeable(k) && k.permissions.every(allowed);
                 return (
                   <label key={k.id} className={`flex items-center gap-2 text-sm ${ok || assign._ranks.includes(k.id) ? "" : "opacity-40"}`}>
                     <input type="checkbox" disabled={!ok} checked={assign._ranks.includes(k.id)} onChange={() => setAssign({ ...assign, _ranks: assign._ranks.includes(k.id) ? assign._ranks.filter((x) => x !== k.id) : [...assign._ranks, k.id] })} />
-                    {k.name}<span className="text-xs text-muted-foreground">({k.permissions.length} صلاحية)</span>{canRank && !k.permissions.every(allowed) ? " — أكبر من صلاحياتك" : ""}
+                    {k.name}<span className="text-xs text-muted-foreground">({k.permissions.length} صلاحية)</span>{rankChangeable(k) && !k.permissions.every(allowed) ? " — أكبر من صلاحياتك" : !rankChangeable(k) && !assign._ranks.includes(k.id) ? " — فوق رتبتك" : ""}
                   </label>
                 );
               })}
@@ -294,11 +298,23 @@ export function MembersAdmin() {
 
 export function RanksAdmin() {
   const qc = useQueryClient();
-  const { can } = useMe();
+  const { can, me } = useMe();
   const allowed = useAllowed();
   const { data: ranks = [], refetch } = useQuery(ranksQuery);
   const { data: catalog } = useQuery(catalogQuery);
   const [editing, setEditing] = useState<{ id?: string; name: string; permissions: string[] } | null>(null);
+
+  // "رتب تحت أعلى رتبة عنده": بتتحدد بترتيب أعلى رتبة معاه
+  const topOrder = me?.top_rank_order ?? null;
+  const below = (r: RankRow) => topOrder !== null && r.order > topOrder;
+  const mine = me?.rank_ids ?? [];
+  const canCreate = can("ranks.create") || (can("ranks.below.create") && topOrder !== null);
+  const canEdit = (r: RankRow) => can("ranks.edit") || (below(r) && (can("ranks.below.rename") || can("ranks.below.perms")));
+  const canDel = (r: RankRow) => can("ranks.delete") || (below(r) && can("ranks.below.delete"));
+  const canSelf = (r: RankRow) => can("ranks.below.self") && below(r) && (mine.includes(r.id) || r.permissions.every(allowed));
+  const globalEdit = can("ranks.edit");
+  const nameLocked = !!editing?.id && !globalEdit && !can("ranks.below.rename");
+  const permsLocked = !!editing?.id && !globalEdit && !can("ranks.below.perms");
 
   const refresh = () => { refetch(); qc.invalidateQueries({ queryKey: ["admin-members"] }); qc.invalidateQueries({ queryKey: ["me"] }); };
 
@@ -309,10 +325,16 @@ export function RanksAdmin() {
     toast.success("تم الحفظ — والتعديل اتطبق على كل اللي معاهم الرتبة"); setEditing(null); refresh();
   };
   // نقل رتبة لفوق/لتحت — الأعلى هي اللي بتظهر جنب اسم الشخص لو معاه أكتر من رتبة
+  const canMove = (i: number, dir: -1 | 1) => {
+    const j = i + dir;
+    if (j < 0 || j >= ranks.length) return false;
+    if (can("ranks.reorder")) return true;
+    return can("ranks.below.reorder") && below(ranks[i]) && below(ranks[j]);
+  };
   const move = async (index: number, dir: -1 | 1) => {
+    if (!canMove(index, dir)) return;
     const ids = ranks.map((r) => r.id);
     const j = index + dir;
-    if (j < 0 || j >= ids.length) return;
     [ids[index], ids[j]] = [ids[j], ids[index]];
     try { await reorderRanksFn({ data: ids }); } catch (e: any) { return toast.error(e.message || "حدث خطأ"); }
     refresh();
@@ -322,10 +344,24 @@ export function RanksAdmin() {
     try { await deleteRankFn({ data: r.id }); } catch (e: any) { return toast.error(e.message || "حدث خطأ"); }
     toast.success("تم الحذف"); refresh();
   };
+  // إضافة/شيل رتبة لنفسك (تحت أعلى رتبة عندك)
+  const toggleSelf = async (r: RankRow) => {
+    const next = mine.includes(r.id) ? mine.filter((x) => x !== r.id) : [...mine, r.id];
+    try { await setSelfRanksFn({ data: { rank_ids: next } }); } catch (e: any) { return toast.error(e.message || "حدث خطأ"); }
+    toast.success(mine.includes(r.id) ? "اتشالت الرتبة منك" : "اتضافت الرتبة لك"); refresh();
+  };
+  const onlyBelow = !can("ranks.create") && !can("ranks.edit") && !can("ranks.delete") && !can("ranks.reorder");
 
   return (
     <div>
-      {can("ranks.create") && <button onClick={() => setEditing({ name: "", permissions: [] })} className="btn-gold ripple mb-6 inline-flex items-center gap-2"><Plus className="h-4 w-4" />رتبة جديدة</button>}
+      {canCreate && <button onClick={() => setEditing({ name: "", permissions: [] })} className="btn-gold ripple mb-6 inline-flex items-center gap-2"><Plus className="h-4 w-4" />رتبة جديدة</button>}
+      {onlyBelow && (
+        <div className="mb-4 rounded-lg border border-[var(--gold)]/40 bg-[var(--gold)]/10 p-3 text-sm leading-loose">
+          {topOrder === null
+            ? "مفيش عندك رتبة، فمش هتقدر تتحكم في أي رتب. اطلب رتبة الأول."
+            : "يقتصر نطاق صلاحيتك على الرتب الأدنى من أعلى رتبة تشغلها (الموسومة بعلامة «أدنى منك»)، وضمن حدود صلاحياتك."}
+        </div>
+      )}
       {ranks.length > 1 && (
         <div className="text-xs text-muted-foreground mb-4">
           الترتيب من فوق لتحت حسب الأولوية: لو شخص معاه أكتر من رتبة، <b className="text-foreground">الأعلى</b> هي اللي بتظهر جنب اسمه في الدردشة، وبتتقدّم في قوايم الأعضاء.
@@ -333,21 +369,31 @@ export function RanksAdmin() {
       )}
       <div className="grid gap-3">
         {ranks.map((r, i) => (
-          <div key={r.id} className="mil-card p-4 flex items-center gap-4">
-            {can("ranks.reorder") ? (
+          <div key={r.id} className="mil-card p-4 flex flex-wrap items-center gap-4">
+            {canMove(i, -1) || canMove(i, 1) ? (
               <div className="flex flex-col -my-1">
-                <button title="لفوق" disabled={i === 0} onClick={() => move(i, -1)} className="p-0.5 text-muted-foreground hover:text-[var(--gold)] disabled:opacity-20"><ChevronUp className="h-4 w-4" /></button>
-                <button title="لتحت" disabled={i === ranks.length - 1} onClick={() => move(i, 1)} className="p-0.5 text-muted-foreground hover:text-[var(--gold)] disabled:opacity-20"><ChevronDown className="h-4 w-4" /></button>
+                <button title="لفوق" disabled={!canMove(i, -1)} onClick={() => move(i, -1)} className="p-0.5 text-muted-foreground hover:text-[var(--gold)] disabled:opacity-20"><ChevronUp className="h-4 w-4" /></button>
+                <button title="لتحت" disabled={!canMove(i, 1)} onClick={() => move(i, 1)} className="p-0.5 text-muted-foreground hover:text-[var(--gold)] disabled:opacity-20"><ChevronDown className="h-4 w-4" /></button>
               </div>
             ) : null}
             <div className="w-6 text-center text-sm font-bold text-[var(--gold)]">{i + 1}</div>
             <UserCog className="h-5 w-5 text-[var(--gold)]" />
-            <div className="flex-1">
-              <div className="font-bold">{r.name}</div>
+            <div className="flex-1 min-w-40">
+              <div className="font-bold flex flex-wrap items-center gap-2">
+                {r.name}
+                {mine.includes(r.id) && <span className="text-[10px] rounded-full bg-emerald-500/20 text-emerald-500 px-2 py-0.5">رتبتك الحالية</span>}
+                {below(r) && <span className="text-[10px] rounded-full bg-white/10 text-muted-foreground px-2 py-0.5">أدنى منك</span>}
+              </div>
               <div className="text-xs text-muted-foreground">{r.permissions.length} صلاحية • {r.members} عضو</div>
             </div>
-            {can("ranks.edit") && <button onClick={() => setEditing({ id: r.id, name: r.name, permissions: r.permissions })} className="p-2 hover:text-[var(--gold)]"><Edit3 className="h-4 w-4" /></button>}
-            {can("ranks.delete") && <button onClick={() => del(r)} className="p-2 hover:text-destructive"><Trash2 className="h-4 w-4" /></button>}
+            {canSelf(r) && (
+              <button
+                onClick={() => toggleSelf(r)}
+                className={`px-3 py-1.5 rounded-full border text-xs transition ${mine.includes(r.id) ? "border-destructive/60 text-destructive hover:bg-destructive/10" : "border-[var(--gold)] text-[var(--gold)] hover:bg-[var(--gold)]/10"}`}
+              >{mine.includes(r.id) ? "شيلها مني" : "أضفها لي"}</button>
+            )}
+            {canEdit(r) && <button onClick={() => setEditing({ id: r.id, name: r.name, permissions: r.permissions })} className="p-2 hover:text-[var(--gold)]"><Edit3 className="h-4 w-4" /></button>}
+            {canDel(r) && <button onClick={() => del(r)} className="p-2 hover:text-destructive"><Trash2 className="h-4 w-4" /></button>}
           </div>
         ))}
         {ranks.length === 0 && <div className="text-center text-muted-foreground py-12">لسه مفيش رتب. اعمل أول رتبة وحدد صلاحياتها.</div>}
@@ -355,8 +401,11 @@ export function RanksAdmin() {
 
       {editing && (
         <Modal onClose={() => setEditing(null)} title={editing.id ? "تعديل رتبة" : "رتبة جديدة"} wide>
-          <Field label="اسم الرتبة"><input className="input" value={editing.name} maxLength={60} onChange={(e) => setEditing({ ...editing, name: e.target.value })} /></Field>
-          <PermissionEditor value={editing.permissions} onChange={(v) => setEditing({ ...editing, permissions: v })} catalog={catalog} allowed={allowed} />
+          <Field label="اسم الرتبة" hint={nameLocked ? "مفيش عندك صلاحية تعديل اسم الرتبة." : undefined}>
+            <input className="input" value={editing.name} maxLength={60} disabled={nameLocked} onChange={(e) => setEditing({ ...editing, name: e.target.value })} />
+          </Field>
+          {permsLocked && <div className="mb-3 text-sm text-muted-foreground">مفيش عندك صلاحية تعديل صلاحيات الرتبة، تقدر تغيّر الاسم بس.</div>}
+          <PermissionEditor value={editing.permissions} onChange={(v) => setEditing({ ...editing, permissions: v })} catalog={catalog} allowed={(k) => !permsLocked && allowed(k)} />
           <button onClick={save} className="btn-gold ripple mt-6 inline-flex items-center gap-2"><Save className="h-4 w-4" />حفظ</button>
         </Modal>
       )}

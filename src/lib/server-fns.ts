@@ -102,6 +102,8 @@ export const currentUserFn = createServerFn({ method: "GET" }).handler(async () 
     military_code: user.military_code,
     rank_requested: user.rank_requested,
     rank_names: actor.rankNames,
+    rank_ids: actor.ranks.map((r) => r.id),
+    top_rank_order: access.topRankOrder(actor), // ترتيب أعلى رتبة عنده (null = من غير رتبة)
     rank_name: title ?? (actor.rankNames.join("، ") || null),
     display_title: user.display_title,
     avatar: user.avatar,

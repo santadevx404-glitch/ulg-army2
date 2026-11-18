@@ -355,6 +355,21 @@ export const saveRankFn = createServerFn({ method: "POST" })
     return saved;
   });
 
+/** الشخص يضيف/يشيل لنفسه رتب تحت أعلى رتبة عنده (ranks.below.self) */
+export const setSelfRanksFn = createServerFn({ method: "POST" })
+  .validator((d: { rank_ids: string[] }) => d)
+  .handler(async ({ data }) => {
+    const actor = await requireActor();
+    const res = await access.assignStaff(actor, actor.user.id, { rank_ids: data.rank_ids ?? [], grants: [], denies: [] });
+    if (res.changed) {
+      await audit.logAdmin(actor, {
+        category: "staff", action: "rank.self", summary: "عدّل رتبه بنفسه", target: actor.user.account_name,
+        changes: [{ label: "الرتب", before: res.before.ranks.join("، ") || "من غير رتبة", after: res.after.ranks.join("، ") || "من غير رتبة" }],
+      });
+    }
+    return {};
+  });
+
 export const deleteRankFn = createServerFn({ method: "POST" })
   .validator((id: string) => id)
   .handler(async ({ data: id }) => {

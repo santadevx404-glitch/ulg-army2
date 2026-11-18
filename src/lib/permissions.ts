@@ -218,6 +218,19 @@ export const GLOBAL_TREE: PNode[] = [
       { key: "ranks.edit", label: "تعديل رتبة" },
       { key: "ranks.delete", label: "حذف رتبة" },
       { key: "ranks.reorder", label: "ترتيب الرتب (اللي بتظهر جنب اسم الشخص)" },
+      {
+        key: "ranks.below",
+        label: "إدارة الرتب الأدنى (الأدنى من أعلى رتبة يشغلها)",
+        children: [
+          { key: "ranks.below.create", label: "إنشاء رتب أدنى" },
+          { key: "ranks.below.rename", label: "تعديل مسميات الرتب الأدنى" },
+          { key: "ranks.below.perms", label: "تعديل صلاحيات الرتب الأدنى (ضمن نطاق صلاحياته)" },
+          { key: "ranks.below.delete", label: "حذف الرتب الأدنى" },
+          { key: "ranks.below.reorder", label: "إعادة ترتيب الرتب الأدنى" },
+          { key: "ranks.below.self", label: "إضافة الرتب الأدنى إلى حسابه أو إزالتها منه" },
+          { key: "ranks.below.others", label: "منح الرتب الأدنى لغيره أو سحبها منهم" },
+        ],
+      },
     ],
   },
   {
