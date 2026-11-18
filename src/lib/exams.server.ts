@@ -88,7 +88,7 @@ export type SubmitReason = "manual" | "attempt_timer" | "exam_timer";
 export type BlockReason = "leave" | "tab_switch" | "reentry";
 export type TabAction = "warn" | "swap"; // تحذير فقط | تحذير + تبديل السؤال الحالي (أو تصفيره لو مفيش بديل)
 /** إشعار مخالفة بيتبعت للطالب: warn = تحذير • swap = السؤال اتبدّل • zero = السؤال اتصفّر */
-export type ViolationNotice = { n: number; kind: "warn" | "swap" | "zero"; used: number; total: number; qid?: string; new_qid?: string; at: string };
+export type ViolationNotice = { n: number; kind: "warn" | "swap" | "zero"; used: number; total: number; qid?: string; new_qid?: string; old_text?: string; at: string };
 
 export type Attempt = {
   id: string;
@@ -717,6 +717,7 @@ async function applyTabViolation(
       const pick = pool.length ? pool[crypto.randomInt(0, pool.length)] : null;
       if (pick) {
         const idx = att.questions.findIndex((q) => q.id === target);
+        const oldText = att.questions[idx].text;
         att.questions = att.questions.map((q, i) => i === idx ? {
           id: pick.id, type: pick.type, text: pick.text,
           options: pick.type === "choice" ? (exam.shuffle ? shuffle(pick.options) : pick.options) : [],
@@ -728,7 +729,7 @@ async function applyTabViolation(
         att.answers = restAns;
         att.images = restImg;
         if (oldImgs.length) await deleteExamImages(oldImgs);
-        att.notices = [...att.notices, { ...base, kind: "swap", qid: target, new_qid: pick.id }];
+        att.notices = [...att.notices, { ...base, kind: "swap", qid: target, new_qid: pick.id, old_text: oldText }];
         return "recorded";
       }
       // مفيش سؤال بديل: السؤال بياخد 0 تلقائي والطالب يكمّل على اللي بعده
@@ -1043,6 +1044,7 @@ export type MyResultItem = {
   score: number;
   verdict: "correct" | "above" | "half" | "below" | "wrong"; // كاملة | فوق النص | النص | تحت النص | صفر
   feedback: string | null; // الإجابة الصح / تعليق المصحح (لو الإجابة مش كاملة)
+  violation: "zeroed" | "replaced" | null; // اتصفّر / اتغيّر بسبب مخالفة تبديل التاب
 };
 export type MyResult = {
   attempt_id: string;
@@ -1091,6 +1093,7 @@ export async function myResults(userId: string): Promise<MyResult[]> {
               max: sq.points,
               score,
               verdict: verdictOf(score, sq.points),
+              violation: a.zeroed.includes(sq.id) ? "zeroed" : a.notices.some((n) => n.kind === "swap" && n.new_qid === sq.id) ? "replaced" : null,
               feedback: a.zeroed.includes(sq.id) ? "اتصفّر السؤال ده تلقائيًا بسبب مخالفة تبديل التبويب أثناء الاختبار." : score >= sq.points ? null : a.feedback[sq.id] || (g.items[i].auto ? autoFeedback(sq.type, live.get(sq.id)) : null),
             } satisfies MyResultItem;
           })
@@ -1426,6 +1429,8 @@ export type AdminAttemptDetail = {
     score: number | null;
     auto: boolean; // الدرجة اتحسبت تلقائي
     feedback: string;
+    violation: "zeroed" | "replacement" | null; // اتصفّر / جه بدل سؤال اتشال بسبب مخالفة
+    replaced_text: string | null; // نص السؤال اللي اتشال (لو ده سؤال بديل)
   }[];
   total: number;
   max: number;
@@ -1452,6 +1457,8 @@ export async function adminGetAttempt(id: string): Promise<AdminAttemptDetail | 
     items: att.questions.map((sq, i) => {
       const live = qMap.get(sq.id);
       return {
+        violation: att.zeroed.includes(sq.id) ? "zeroed" : att.notices.some((n) => n.kind === "swap" && n.new_qid === sq.id) ? "replacement" : null,
+        replaced_text: att.notices.find((n) => n.kind === "swap" && n.new_qid === sq.id)?.old_text ?? null,
         points: sq.points,
         correct_answer: live?.correct_answer ?? null,
         wrong_part: live?.wrong_part ?? null,

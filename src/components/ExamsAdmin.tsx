@@ -679,6 +679,7 @@ function AttemptModal({ id, canGrade, onClose }: { id: string; canGrade: boolean
       const v = scores[it.id];
       const sc = v === undefined || v === "" ? (it.score ?? 0) : Number(v);
       const autoOk = it.auto && v === undefined;
+      if (it.violation === "zeroed") continue; // اتصفّر بسبب مخالفة: مفيش مطلوب تعليق
       if (sc < it.points && !autoOk && !(fbs[it.id] ?? "").trim() && !(it.auto && it.correct_answer)) {
         return toast.error(`اكتب الإجابة الصح للسؤال ${i + 1} (درجته أقل من الكاملة)`);
       }
@@ -705,12 +706,34 @@ function AttemptModal({ id, canGrade, onClose }: { id: string; canGrade: boolean
             الدرجة: <span className="font-black text-[var(--gold)] text-lg" dir="ltr">{total} / {max}</span>
             <span className="text-xs text-muted-foreground mr-3">{data.grading === "auto" ? "تصحيح تلقائي للاختيارات" : "تصحيح يدوي"}</span>
           </div>
+          {data.attempt.violations > 0 && (
+            <div className="mb-4 rounded-lg border border-destructive/50 bg-destructive/10 p-3 text-sm">
+              <div className="font-bold text-destructive mb-1">مخالفات تبديل التاب: {data.attempt.violations}</div>
+              <div className="flex flex-wrap gap-2 text-xs">
+                {data.attempt.notices.map((n) => (
+                  <span key={n.n} className="rounded-full border border-destructive/40 px-2 py-0.5">
+                    {n.used}) {n.kind === "warn" ? "تحذير فقط" : n.kind === "swap" ? "تبديل سؤال" : "تصفير سؤال"}
+                  </span>
+                ))}
+                {data.attempt.status === "blocked" && <span className="rounded-full bg-destructive text-white px-2 py-0.5">انتهت بحظر</span>}
+              </div>
+            </div>
+          )}
           <div className="space-y-4">
             {data.items.map((it, i) => (
-              <div key={it.id} className="rounded-lg border border-border p-4">
+              <div key={it.id} className={`rounded-lg border p-4 ${it.violation ? "border-2 border-destructive bg-destructive/5" : "border-border"}`}>
+                {it.violation === "zeroed" && (
+                  <div className="mb-3 rounded-md bg-destructive/15 px-3 py-2 text-sm font-bold text-destructive">⚠ اتصفّر السؤال ده تلقائيًا بسبب مخالفة (تبديل التاب) ومفيش بديل متاح.</div>
+                )}
+                {it.violation === "replacement" && (
+                  <div className="mb-3 rounded-md bg-destructive/15 px-3 py-2 text-sm text-destructive">
+                    <b>⚠ السؤال ده اتغيّر بسبب مخالفة (تبديل التاب)</b> — جه بدل سؤال اتشال من الطالب.
+                    {it.replaced_text && <div className="mt-1 text-xs text-foreground/80 whitespace-pre-wrap">السؤال اللي اتشال: «{it.replaced_text}»</div>}
+                  </div>
+                )}
                 <div className="flex items-start gap-3">
                   <div className="font-semibold mb-2 whitespace-pre-wrap flex-1">{i + 1}. {it.text}</div>
-                  {gradable ? (
+                  {gradable && it.violation !== "zeroed" ? (
                     <label className="shrink-0 text-xs text-muted-foreground flex items-center gap-1" dir="ltr">
                       <input
                         type="number" min={0} max={it.points} step="any" className="input !w-20 !py-1 text-center"
@@ -726,7 +749,7 @@ function AttemptModal({ id, canGrade, onClose }: { id: string; canGrade: boolean
                 <div className={`whitespace-pre-wrap rounded-md p-3 ${it.answer.trim() ? "bg-white/5" : "bg-destructive/10 text-destructive text-sm"}`}>
                   {formatAnswer(it.type, it.answer) || (it.images.length ? "(من غير نص — في صور)" : "(من غير إجابة)")}
                 </div>
-                {gradable && (() => {
+                {gradable && it.violation !== "zeroed" && (() => {
                   const v = scores[it.id];
                   const sc = v === undefined || v === "" ? (it.score ?? 0) : Number(v);
                   const autoWrong = it.auto && !!it.correct_answer;

@@ -2,7 +2,7 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
-import { ArrowRight, Award, CheckCircle2, ChevronDown, Hourglass, MinusCircle, XCircle } from "lucide-react";
+import { AlertTriangle, ArrowRight, Award, CheckCircle2, ChevronDown, Hourglass, MinusCircle, XCircle } from "lucide-react";
 import { myExamResultsFn } from "@/lib/exam-fns";
 import { formatAnswer } from "@/lib/answer-format";
 import { useMe } from "@/lib/use-me";
@@ -146,7 +146,7 @@ function NewReview({ items }: { items: MyResult["items"] }) {
         {items.map((x, i) => (
           <button
             key={x.id} type="button" onClick={() => setCur(i)}
-            className={`h-9 w-9 rounded-full border text-sm font-bold ${V[x.verdict].box} ${V[x.verdict].text} ${i === cur ? "ring-2 ring-[var(--gold)]" : ""}`}
+            className={`h-9 w-9 rounded-full border text-sm font-bold ${x.violation ? "border-2 border-destructive bg-destructive/10 text-destructive" : `${V[x.verdict].box} ${V[x.verdict].text}`} ${i === cur ? "ring-2 ring-[var(--gold)]" : ""}`}
           >{i + 1}</button>
         ))}
       </div>
@@ -163,7 +163,13 @@ function NewReview({ items }: { items: MyResult["items"] }) {
 
 function ItemBox({ it, i }: { it: MyResult["items"][number]; i: number }) {
   return (
-            <div className={`rounded-lg border p-4 ${V[it.verdict].box}`}>
+            <div className={`rounded-lg p-4 ${it.violation ? "border-2 border-destructive bg-destructive/5" : `border ${V[it.verdict].box}`}`}>
+              {it.violation && (
+                <div className="mb-3 rounded-md bg-destructive/15 px-3 py-2 text-sm font-bold text-destructive flex items-center gap-2">
+                  <AlertTriangle className="h-4 w-4 shrink-0" />
+                  {it.violation === "zeroed" ? "تم تصفير السؤال ده بسبب مخالفتك (تبديل التبويب أثناء الاختبار)." : "تم تغيير السؤال ده بسبب مخالفتك (تبديل التبويب أثناء الاختبار)."}
+                </div>
+              )}
               <div className="flex items-start gap-3">
                 <div className="mt-0.5 shrink-0">
                   {it.verdict === "correct" ? <CheckCircle2 className={`h-5 w-5 ${V.correct.text}`} /> : it.verdict === "wrong" ? <XCircle className={`h-5 w-5 ${V.wrong.text}`} /> : <MinusCircle className={`h-5 w-5 ${V[it.verdict].text}`} />}
