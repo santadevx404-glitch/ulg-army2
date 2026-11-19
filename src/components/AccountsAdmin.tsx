@@ -265,11 +265,11 @@ export function MembersAdmin() {
           <Field label="الرتب (ممكن أكتر من رتبة، والصلاحيات بتتجمّع)" hint={canRank ? undefined : canBelowOthers ? "تقدر تضيف وتشيل بس الرتب اللي تحت أعلى رتبة عندك." : "مفيش عندك صلاحية تغيير الرتب."}>
             <div className="grid gap-1 rounded-lg border border-border p-2 max-h-56 overflow-y-auto">
               {ranks.map((k) => {
-                const ok = rankChangeable(k) && k.permissions.every(allowed);
+                const ok = rankChangeable(k) && (canRank || canBelowOthers && !canRank ? (canRank ? k.permissions.every(allowed) : true) : false);
                 return (
                   <label key={k.id} className={`flex items-center gap-2 text-sm ${ok || assign._ranks.includes(k.id) ? "" : "opacity-40"}`}>
                     <input type="checkbox" disabled={!ok} checked={assign._ranks.includes(k.id)} onChange={() => setAssign({ ...assign, _ranks: assign._ranks.includes(k.id) ? assign._ranks.filter((x) => x !== k.id) : [...assign._ranks, k.id] })} />
-                    {k.name}<span className="text-xs text-muted-foreground">({k.permissions.length} صلاحية)</span>{rankChangeable(k) && !k.permissions.every(allowed) ? " — أكبر من صلاحياتك" : !rankChangeable(k) && !assign._ranks.includes(k.id) ? " — فوق رتبتك" : ""}
+                    {k.name}<span className="text-xs text-muted-foreground">({k.permissions.length} صلاحية)</span>{canRank && !k.permissions.every(allowed) ? " — أكبر من صلاحياتك" : !rankChangeable(k) && !assign._ranks.includes(k.id) ? " — فوق رتبتك" : ""}
                   </label>
                 );
               })}
@@ -312,7 +312,7 @@ export function RanksAdmin() {
   const canEdit = (r: RankRow) => can("ranks.edit") || (below(r) && (can("ranks.below.rename") || can("ranks.below.perms")));
   const canDel = (r: RankRow) => can("ranks.delete") || (below(r) && can("ranks.below.delete"));
   const selfEnabled = can("ranks.below.self");
-  const canSelf = (r: RankRow) => selfEnabled && below(r) && (mine.includes(r.id) || r.permissions.every(allowed));
+  const canSelf = (r: RankRow) => selfEnabled && below(r);
   const globalEdit = can("ranks.edit");
   const nameLocked = !!editing?.id && !globalEdit && !can("ranks.below.rename");
   const permsLocked = !!editing?.id && !globalEdit && !can("ranks.below.perms");
@@ -387,9 +387,6 @@ export function RanksAdmin() {
               </div>
               <div className="text-xs text-muted-foreground">{r.permissions.length} صلاحية • {r.members} عضو</div>
             </div>
-            {selfEnabled && below(r) && !canSelf(r) && (
-              <span className="text-[11px] text-muted-foreground">صلاحياتها تتجاوز صلاحياتك</span>
-            )}
             {canSelf(r) && (
               <button
                 onClick={() => toggleSelf(r)}
