@@ -342,3 +342,9 @@ select.input { appearance: none; }
 
 /* الصور البرايفت مبتتطبعش */
 @media print { .private-canvas { display: none !important; } }
+
+/* سكرول ظاهر وقابل للسحب (للقوائم الطويلة) */
+.drag-scroll { scrollbar-width: auto; scrollbar-color: oklch(0.78 0.14 85 / 70%) oklch(1 0 0 / 8%); }
+.drag-scroll::-webkit-scrollbar { display: block; width: 14px; }
+.drag-scroll::-webkit-scrollbar-thumb { background: oklch(0.78 0.14 85 / 70%); border-radius: 8px; border: 3px solid transparent; background-clip: padding-box; min-height: 40px; }
+.drag-scroll::-webkit-scrollbar-track { background: oklch(1 0 0 / 8%); border-radius: 8px; }

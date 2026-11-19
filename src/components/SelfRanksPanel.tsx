@@ -83,7 +83,7 @@ export function SelfRanksPanel() {
               <ChevronDown className={`h-4 w-4 shrink-0 transition ${open ? "rotate-180" : ""}`} />
             </button>
             {open && (
-              <div className="mt-2 w-full min-h-72 max-h-[65vh] overflow-y-auto rounded-lg border border-border bg-background shadow-2xl p-2 space-y-1">
+              <div className="mt-2 w-full min-h-72 max-h-[65vh] overflow-y-scroll drag-scroll rounded-lg border border-border bg-background shadow-2xl p-2 space-y-1">
                 {below.map((r) => {
                   const on = picked.includes(r.id);
                   return (
