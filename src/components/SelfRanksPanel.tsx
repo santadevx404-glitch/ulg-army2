@@ -83,13 +83,13 @@ export function SelfRanksPanel() {
               <ChevronDown className={`h-4 w-4 shrink-0 transition ${open ? "rotate-180" : ""}`} />
             </button>
             {open && (
-              <div className="absolute z-20 mt-1 w-full max-h-64 overflow-y-auto rounded-lg border border-border bg-background shadow-2xl p-1">
+              <div className="mt-2 w-full min-h-72 max-h-[65vh] overflow-y-auto rounded-lg border border-border bg-background shadow-2xl p-2 space-y-1">
                 {below.map((r) => {
                   const on = picked.includes(r.id);
                   return (
                     <button
                       key={r.id} type="button" onClick={() => toggle(r.id)}
-                      className={`w-full flex items-center gap-3 rounded-md px-3 py-2 text-sm text-right hover:bg-white/5 ${on ? "text-[var(--gold)]" : ""}`}
+                      className={`w-full flex items-center gap-3 rounded-md px-3 py-3 text-sm text-right hover:bg-white/5 ${on ? "text-[var(--gold)]" : ""}`}
                     >
                       <span className={`h-5 w-5 shrink-0 rounded border flex items-center justify-center ${on ? "bg-[var(--gold)] border-[var(--gold)] text-black" : "border-border"}`}>
                         {on && <Check className="h-3.5 w-3.5" />}
