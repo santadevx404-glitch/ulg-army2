@@ -311,7 +311,8 @@ export function RanksAdmin() {
   const canCreate = can("ranks.create") || (can("ranks.below.create") && topOrder !== null);
   const canEdit = (r: RankRow) => can("ranks.edit") || (below(r) && (can("ranks.below.rename") || can("ranks.below.perms")));
   const canDel = (r: RankRow) => can("ranks.delete") || (below(r) && can("ranks.below.delete"));
-  const canSelf = (r: RankRow) => can("ranks.below.self") && below(r) && (mine.includes(r.id) || r.permissions.every(allowed));
+  const selfEnabled = can("ranks.below.self");
+  const canSelf = (r: RankRow) => selfEnabled && below(r) && (mine.includes(r.id) || r.permissions.every(allowed));
   const globalEdit = can("ranks.edit");
   const nameLocked = !!editing?.id && !globalEdit && !can("ranks.below.rename");
   const permsLocked = !!editing?.id && !globalEdit && !can("ranks.below.perms");
@@ -386,11 +387,14 @@ export function RanksAdmin() {
               </div>
               <div className="text-xs text-muted-foreground">{r.permissions.length} صلاحية • {r.members} عضو</div>
             </div>
+            {selfEnabled && below(r) && !canSelf(r) && (
+              <span className="text-[11px] text-muted-foreground">صلاحياتها تتجاوز صلاحياتك</span>
+            )}
             {canSelf(r) && (
               <button
                 onClick={() => toggleSelf(r)}
                 className={`px-3 py-1.5 rounded-full border text-xs transition ${mine.includes(r.id) ? "border-destructive/60 text-destructive hover:bg-destructive/10" : "border-[var(--gold)] text-[var(--gold)] hover:bg-[var(--gold)]/10"}`}
-              >{mine.includes(r.id) ? "شيلها مني" : "أضفها لي"}</button>
+              >{mine.includes(r.id) ? "إزالة من حسابي" : "إضافة إلى حسابي"}</button>
             )}
             {canEdit(r) && <button onClick={() => setEditing({ id: r.id, name: r.name, permissions: r.permissions })} className="p-2 hover:text-[var(--gold)]"><Edit3 className="h-4 w-4" /></button>}
             {canDel(r) && <button onClick={() => del(r)} className="p-2 hover:text-destructive"><Trash2 className="h-4 w-4" /></button>}

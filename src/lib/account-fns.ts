@@ -8,6 +8,7 @@ import * as store from "./local-store.server";
 import * as exams from "./exams.server";
 import * as chats from "./chat.server";
 import * as announcements from "./announcements.server";
+import * as presence from "./presence.server";
 import { SCOPE_TREES, labelOfBase, parseKey } from "./permissions";
 
 async function requireActor(): Promise<access.Actor> {
@@ -427,4 +428,52 @@ export const loginLogFn = createServerFn({ method: "POST" })
     const actor = await requireActor();
     fullOnly(actor);
     return audit.listLogins(data);
+  });
+
+
+// ==================== المتصلين دلوقتي ====================
+
+export type OnlineUser = {
+  id: string;
+  account_name: string;
+  character_name: string;
+  avatar: string | null;
+  rank_name: string | null; // أعلى رتبة (أو لقب الأدمن الأساسي)
+  rank_names: string[];
+  military_code: string | null; // بيظهر بس لمن يقدر يشوف بيانات الأعضاء
+  page: string; // اسم الصفحة اللي هو فيها
+  me: boolean;
+};
+
+/** بيسجّل إنك متصل (والصفحة اللي إنت فيها) ويرجّع قايمة المتصلين دلوقتي. */
+export const presenceFn = createServerFn({ method: "POST" })
+  .validator((d: { path: string }) => d)
+  .handler(async ({ data }): Promise<OnlineUser[]> => {
+    const actor = await requireActor();
+    await presence.touch(actor.user.id, data.path);
+    const [entries, users, ranks, sections, items] = await Promise.all([
+      presence.onlineEntries(), auth.listUsers(), access.listRanks(), store.getSections(), store.getItems(),
+    ]);
+    const showCode = access.canAny(actor, "accounts.members");
+    const out: OnlineUser[] = [];
+    for (const u of users) {
+      const e = entries[u.id];
+      if (!e || u.status !== "active") continue;
+      if (u.hidden && !actor.full && u.id !== actor.user.id) continue; // المخفيين مبيظهروش
+      const mine = ranks.filter((r) => u.rank_ids.includes(r.id)).sort((x, y) => x.order - y.order);
+      const owner = auth.isOwner(u);
+      out.push({
+        id: u.id,
+        account_name: u.account_name,
+        character_name: u.character_name,
+        avatar: u.avatar,
+        rank_name: owner ? u.display_title || "الأدمن الأساسي" : mine[0]?.name ?? null,
+        rank_names: owner ? [u.display_title || "الأدمن الأساسي"] : mine.map((r) => r.name),
+        military_code: showCode ? u.military_code : null,
+        page: presence.pageLabel(e.path, sections, items),
+        me: u.id === actor.user.id,
+      });
+    }
+    // أنت أولًا ثم الأعلى رتبة
+    return out.sort((a, b) => Number(b.me) - Number(a.me) || a.account_name.localeCompare(b.account_name, "ar"));
   });

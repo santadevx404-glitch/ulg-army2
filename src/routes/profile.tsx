@@ -8,6 +8,7 @@ import { logoutFn } from "@/lib/server-fns";
 import { changeMyPasswordFn, setMyTitleFn } from "@/lib/account-fns";
 import { useMe } from "@/lib/use-me";
 import { Avatar } from "@/components/Avatar";
+import { SelfRanksPanel } from "@/components/SelfRanksPanel";
 import { TAB_LABELS, type TabId } from "@/lib/permissions";
 
 /** بيقص الصورة مربعة من النص ويصغّرها 512px ويحوّلها JPEG عشان تبقى خفيفة. */
@@ -135,6 +136,8 @@ function ProfilePage() {
           )}
           {row("الإيميل", me.email)}
         </div>
+
+        <SelfRanksPanel />
 
         {me.owner && (
           <div className="mil-card p-6">
