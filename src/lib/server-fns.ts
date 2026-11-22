@@ -87,7 +87,6 @@ export const currentUserFn = createServerFn({ method: "GET" }).handler(async () 
   const { user } = actor;
   const perms = [...actor.perms];
   const tabs = visibleTabs(actor.perms, actor.full);
-  const title = actor.owner ? user.display_title || "الأدمن الأساسي" : null;
   return {
     id: user.id,
     email: user.email,
@@ -104,7 +103,7 @@ export const currentUserFn = createServerFn({ method: "GET" }).handler(async () 
     rank_names: actor.rankNames,
     rank_ids: actor.ranks.map((r) => r.id),
     top_rank_order: access.topRankOrder(actor), // ترتيب أعلى رتبة عنده (null = من غير رتبة)
-    rank_name: title ?? (actor.rankNames.join("، ") || null),
+    rank_name: actor.rankNames.join("، ") || null,
     display_title: user.display_title,
     avatar: user.avatar,
     created_at: user.created_at,

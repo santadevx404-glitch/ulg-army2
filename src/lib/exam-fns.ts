@@ -22,6 +22,8 @@ function examCan(actor: access.Actor, examId: string): exams.ExamCan {
   const settings: Record<string, boolean> = {};
   for (const g of EXAM_SETTINGS_FIELDS) settings[g.id] = access.can(actor, `exams.manage.settings.${g.id}`, scope);
   return {
+    open: access.can(actor, "exams.open", scope),
+    close: access.can(actor, "exams.close", scope),
     settings,
     anySettings: Object.values(settings).some(Boolean),
     questions: {
@@ -109,7 +111,8 @@ export const adminExamsFn = createServerFn({ method: "GET" }).handler(async () =
     .map((e) => {
       const can = examCan(actor, e.id);
       // كلمة سر الاختبار مبتظهرش غير لمن يقدر يعدّل نوع الاختبار
-      return { ...e, password: can.settings.access ? e.password : e.password ? MASK : null, can };
+      // ولو الاختبار مفتوح بالزرار فكلمته العشوائية بتظهر لمن يقدر يفتحه
+      return { ...e, password: can.settings.access || (can.open && e.open_until) ? e.password : e.password ? MASK : null, open_prev: null, can };
     });
 });
 
@@ -140,6 +143,30 @@ export const adminSaveExamFn = createServerFn({ method: "POST" })
     if (!actor.full) await auth.addGrants(actor.user.id, [wildcardKey("exam", created.id)]); // اللي عمل الاختبار يديره
     await audit.logAdmin(actor, { category: "exams", action: "exam.create", summary: `أنشأ اختبار «${created.title}»`, target: created.title });
     return created;
+  });
+
+export const adminOpenExamFn = createServerFn({ method: "POST" })
+  .validator((id: string) => id)
+  .handler(async ({ data: id }) => {
+    const actor = await requireActor();
+    access.assertCan(actor, "exams.open", { exam: id });
+    const existing = await exams.adminGetExam(id);
+    if (!existing) throw new Error("الاختبار غير موجود");
+    const res = await exams.adminOpenExam(id, actor.user.account_name || actor.user.email);
+    await audit.logAdmin(actor, { category: "exams", action: "exam.open", summary: `فتح الاختبار «${existing.title}» لمدة ${exams.OPEN_HOURS} ساعة`, target: existing.title });
+    return res;
+  });
+
+export const adminCloseExamFn = createServerFn({ method: "POST" })
+  .validator((id: string) => id)
+  .handler(async ({ data: id }) => {
+    const actor = await requireActor();
+    access.assertCan(actor, "exams.close", { exam: id });
+    const existing = await exams.adminGetExam(id);
+    if (!existing) throw new Error("الاختبار غير موجود");
+    await exams.adminCloseExam(id);
+    await audit.logAdmin(actor, { category: "exams", action: "exam.close", summary: `أغلق الاختبار «${existing.title}»`, target: existing.title });
+    return {};
   });
 
 export const adminDeleteExamFn = createServerFn({ method: "POST" })
@@ -286,4 +313,89 @@ export const adminDeleteAttemptsFn = createServerFn({ method: "POST" })
     await exams.adminDeleteAttempts(ids);
     await audit.logAdmin(actor, { category: "attempts", action: "attempt.delete", summary: `حذف ${ids.length} تسليم`, note });
     return {};
+  });
+
+// ==================== الأرشيف والتظلمات ====================
+
+export const adminArchiveFn = createServerFn({ method: "POST" })
+  .validator((ids: string[]) => ids)
+  .handler(async ({ data: ids }) => {
+    const actor = await requireActor();
+    assertExams(actor, "exams.review.archive", await exams.examIdsForAttempts(ids));
+    const note = await describeAttempts(ids);
+    const res = await exams.adminArchiveAttempts(ids);
+    await audit.logAdmin(actor, { category: "attempts", action: "attempt.archive", summary: `أرشف ${res.count} تسليم`, note });
+    return res;
+  });
+
+export const adminArchiveListFn = createServerFn({ method: "GET" }).handler(async () => {
+  const actor = await requireActor();
+  access.assertCanAny(actor, ["exams.review.archive"]);
+  const rows = await exams.adminListArchive();
+  return actor.full ? rows : rows.filter((r) => access.can(actor, "exams.review.archive", { exam: r.exam_id }));
+});
+
+export const adminArchiveItemFn = createServerFn({ method: "GET" })
+  .validator((id: string) => id)
+  .handler(async ({ data: id }) => {
+    const actor = await requireActor();
+    assertExams(actor, "exams.review.archive", await exams.archiveExamIds([id]));
+    return exams.adminGetArchive(id);
+  });
+
+export const adminGradeArchiveFn = createServerFn({ method: "POST" })
+  .validator((d: { id: string; scores: Record<string, number | string | null>; feedback?: Record<string, string> }) => d)
+  .handler(async ({ data }) => {
+    const actor = await requireActor();
+    const examIds = await exams.archiveExamIds([data.id]);
+    assertExams(actor, "exams.review.archive", examIds);
+    assertExams(actor, "exams.review.grade", examIds);
+    const res = await exams.adminGradeArchive(data.id, data.scores ?? {}, data.feedback ?? {}, actor.user.account_name || actor.user.email);
+    await audit.logAdmin(actor, { category: "attempts", action: "archive.grade", summary: `عدّل تصحيح نسخة أرشيف (${res.total}/${res.max})` });
+    return res;
+  });
+
+export const adminRestoreArchiveFn = createServerFn({ method: "POST" })
+  .validator((d: { id: string; regrade: boolean }) => d)
+  .handler(async ({ data }) => {
+    const actor = await requireActor();
+    assertExams(actor, "exams.review.archive", await exams.archiveExamIds([data.id]));
+    const res = await exams.adminRestoreArchive(data.id, !!data.regrade);
+    await audit.logAdmin(actor, { category: "attempts", action: "archive.restore", summary: data.regrade ? "استرجع تسليم من الأرشيف لإعادة التصحيح" : "استرجع تسليم من الأرشيف" });
+    return res;
+  });
+
+/** مسح نهائي من الأرشيف — صاحب الموقع بس. */
+export const ownerDeleteArchiveFn = createServerFn({ method: "POST" })
+  .validator((ids: string[]) => ids)
+  .handler(async ({ data: ids }) => {
+    const actor = await requireActor();
+    if (!actor.owner) throw new Error("مسح الأرشيف نهائيًا لصاحب الموقع بس");
+    const res = await exams.ownerDeleteArchive(ids);
+    await audit.logAdmin(actor, { category: "attempts", action: "archive.delete", summary: `مسح ${res.count} نسخة من الأرشيف نهائيًا` });
+    return res;
+  });
+
+export const createGrievanceFn = createServerFn({ method: "POST" })
+  .validator((d: { attempt_id: string; qid: string | null; message: string }) => d)
+  .handler(async ({ data }) => {
+    const actor = await requireActor();
+    return exams.createGrievance(actor.user.id, data.attempt_id, data.qid, data.message);
+  });
+
+export const adminGrievancesFn = createServerFn({ method: "GET" }).handler(async () => {
+  const actor = await requireActor();
+  access.assertCanAny(actor, ["exams.review.grievances"]);
+  const rows = await exams.adminListGrievances();
+  return actor.full ? rows : rows.filter((g) => access.can(actor, "exams.review.grievances", { exam: g.exam_id }));
+});
+
+export const adminResolveGrievanceFn = createServerFn({ method: "POST" })
+  .validator((d: { id: string; status: "open" | "accepted" | "rejected"; response: string }) => d)
+  .handler(async ({ data }) => {
+    const actor = await requireActor();
+    assertExams(actor, "exams.review.grievances", await exams.grievanceExamIds([data.id]));
+    const g = await exams.adminResolveGrievance(data.id, data.status, data.response, actor.user.account_name || actor.user.email);
+    await audit.logAdmin(actor, { category: "attempts", action: "grievance.resolve", summary: `رد على تظلم (${data.status === "accepted" ? "مقبول" : data.status === "rejected" ? "مرفوض" : "أُعيد فتحه"})`, target: g.identity, note: g.response || null });
+    return g;
   });

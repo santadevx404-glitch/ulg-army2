@@ -85,6 +85,32 @@ export const setMyTitleFn = createServerFn({ method: "POST" })
     return {};
   });
 
+/** حسابات تقدر الملكية تتنقل لها (مفعّلة ومش المالك). */
+export const ownerCandidatesFn = createServerFn({ method: "GET" }).handler(async () => {
+  const actor = await requireActor();
+  ownerOnly(actor);
+  return (await auth.listUsers())
+    .filter((u) => u.status === "active" && !auth.isOwner(u))
+    .map((u) => ({ id: u.id, name: u.account_name || u.email, character_name: u.character_name, email: u.email }));
+});
+
+/** نقل ملكية الموقع لحساب تاني (المالك الحالي بس + تأكيد بكلمة السر). */
+export const transferOwnershipFn = createServerFn({ method: "POST" })
+  .validator((d: { to_id: string; password: string }) => d)
+  .handler(async ({ data }) => {
+    const actor = await requireActor();
+    ownerOnly(actor);
+    if (!(await auth.checkPassword(actor.user.id, data.password))) throw new Error("كلمة المرور غلط");
+    const to = await auth.getUserById(data.to_id);
+    const r = await auth.transferOwnership(actor.user.id, data.to_id);
+    if (r.error) throw new Error(r.error);
+    await audit.logAdmin(actor, {
+      category: "settings", action: "owner.transfer", summary: `نقل ملكية الموقع إلى ${to?.account_name || to?.email || data.to_id}`,
+      changes: [],
+    });
+    return {};
+  });
+
 // ==================== طلبات الحسابات ====================
 
 export type RequestRow = {
@@ -269,6 +295,22 @@ export const deleteMemberFn = createServerFn({ method: "POST" })
     return {};
   });
 
+/** صاحب الموقع يعدّل بيانات نفسه (اسم الحساب والشخصية والكود). */
+export const updateMyDetailsFn = createServerFn({ method: "POST" })
+  .validator((d: { account_name: string; character_name: string; military_code: string }) => d)
+  .handler(async ({ data }) => {
+    const actor = await requireActor();
+    ownerOnly(actor);
+    const t = actor.user;
+    await auth.updateUserDetails(t.id, data, { allowOwner: true });
+    await audit.logAdmin(actor, {
+      category: "accounts", action: "member.update", summary: "عدّل بيانات حسابه", target: data.account_name.trim(),
+      changes: ([["اسم الحساب", t.account_name, data.account_name], ["اسم الشخصية", t.character_name, data.character_name], ["الكود العسكري", t.military_code, data.military_code]] as [string, string, string][])
+        .filter(([, b, a]) => b !== a.trim()).map(([label, before, after]) => ({ label, before: before || null, after: after.trim() || null })),
+    });
+    return {};
+  });
+
 export const updateMemberDetailsFn = createServerFn({ method: "POST" })
   .validator((d: { id: string; account_name: string; character_name: string; military_code: string }) => d)
   .handler(async ({ data }) => {
@@ -438,8 +480,9 @@ export type OnlineUser = {
   account_name: string;
   character_name: string;
   avatar: string | null;
-  rank_name: string | null; // أعلى رتبة (أو لقب الأدمن الأساسي)
+  rank_name: string | null; // أعلى رتبة
   rank_names: string[];
+  is_owner: boolean;
   military_code: string | null; // بيظهر بس لمن يقدر يشوف بيانات الأعضاء
   page: string; // اسم الصفحة اللي هو فيها
   me: boolean;
@@ -467,8 +510,9 @@ export const presenceFn = createServerFn({ method: "POST" })
         account_name: u.account_name,
         character_name: u.character_name,
         avatar: u.avatar,
-        rank_name: owner ? u.display_title || "الأدمن الأساسي" : mine[0]?.name ?? null,
-        rank_names: owner ? [u.display_title || "الأدمن الأساسي"] : mine.map((r) => r.name),
+        rank_name: mine[0]?.name ?? null,
+        rank_names: mine.map((r) => r.name),
+        is_owner: owner,
         military_code: showCode ? u.military_code : null,
         page: presence.pageLabel(e.path, sections, items),
         me: u.id === actor.user.id,

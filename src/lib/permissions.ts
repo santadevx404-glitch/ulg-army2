@@ -150,8 +150,12 @@ export const EXAMS_REVIEW: PNode = {
     { key: "exams.review.view", label: "عرض التسليمات وإجابات الأشخاص" },
     { key: "exams.review.grade", label: "تصحيح الاختبارات وتحديد الدرجات" },
     { key: "exams.review.delete", label: "حذف التسليمات" },
+    { key: "exams.review.archive", label: "أرشيف التسليمات (الأرشفة اليدوية والاطّلاع والاسترجاع وإعادة التصحيح)" },
+    { key: "exams.review.grievances", label: "التظلمات (الاطّلاع عليها والرد عليها)" },
   ],
 };
+export const EXAMS_OPEN: PNode = { key: "exams.open", label: "فتح الاختبار (مدة 12 ساعة بكلمة سر عشوائية)" };
+export const EXAMS_CLOSE: PNode = { key: "exams.close", label: "إغلاق الاختبار" };
 export const EXAMS_UNBLOCK: PNode = { key: "exams.unblock", label: "فك الحظر والسماح بمحاولة جديدة" };
 export const EXAMS_DELETE: PNode = { key: "exams.delete", label: "حذف الاختبار" };
 
@@ -172,7 +176,7 @@ export const GLOBAL_TREE: PNode[] = [
   {
     key: "exams",
     label: "الاختبارات",
-    children: [{ key: "exams.create", label: "إنشاء اختبارات جديدة" }, EXAMS_DELETE, EXAMS_MANAGE, EXAMS_REVIEW, EXAMS_UNBLOCK],
+    children: [{ key: "exams.create", label: "إنشاء اختبارات جديدة" }, EXAMS_DELETE, EXAMS_MANAGE, EXAMS_REVIEW, EXAMS_OPEN, EXAMS_CLOSE, EXAMS_UNBLOCK],
   },
   {
     key: "chats",
@@ -254,7 +258,7 @@ export const SCOPE_TREES: Record<ScopeType, { title: string; nodes: PNode[] }> =
     ],
   },
   item: { title: "عنصر", nodes: [ITEMS_EDIT, ITEMS_DELETE, TOPICS_NODE] },
-  exam: { title: "اختبار", nodes: [EXAMS_MANAGE, EXAMS_REVIEW, EXAMS_UNBLOCK, EXAMS_DELETE] },
+  exam: { title: "اختبار", nodes: [EXAMS_MANAGE, EXAMS_REVIEW, EXAMS_OPEN, EXAMS_CLOSE, EXAMS_UNBLOCK, EXAMS_DELETE] },
   chat: { title: "دردشة", nodes: [CHATS_EDIT, CHATS_DELETE, CHATS_MODERATE] },
   announcement: { title: "إعلان", nodes: [ANNOUNCEMENTS_EDIT, ANNOUNCEMENTS_DELETE] },
 };
@@ -426,13 +430,15 @@ export function covers(perms: PermInput, owner: boolean, key: string): boolean {
 
 // ============================== التابات ==============================
 
-export type TabId = "sections" | "items" | "exams" | "submissions" | "blocked" | "chats" | "announcements" | "requests" | "members" | "ranks" | "log";
+export type TabId = "sections" | "items" | "exams" | "submissions" | "archive" | "grievances" | "blocked" | "chats" | "announcements" | "requests" | "members" | "ranks" | "log";
 
 export const TAB_LABELS: Record<TabId, string> = {
   sections: "الأقسام",
   items: "العناصر",
   exams: "الاختبارات",
   submissions: "التسليمات",
+  archive: "أرشيف التسليمات",
+  grievances: "التظلمات",
   blocked: "المحظورين",
   chats: "الدردشات",
   announcements: "الإعلانات",
@@ -442,15 +448,17 @@ export const TAB_LABELS: Record<TabId, string> = {
   log: "سجل الدخول",
 };
 
-export const TAB_ORDER: TabId[] = ["sections", "items", "exams", "submissions", "blocked", "chats", "announcements", "requests", "members", "ranks", "log"];
+export const TAB_ORDER: TabId[] = ["sections", "items", "exams", "submissions", "archive", "grievances", "blocked", "chats", "announcements", "requests", "members", "ranks", "log"];
 
 export function canSeeTab(perms: PermInput, owner: boolean, tab: TabId): boolean {
   const any = (...l: string[]) => hasAnyOf(perms, owner, l);
   switch (tab) {
     case "sections": return any("sections");
     case "items": return any("items");
-    case "exams": return any("exams.create", "exams.delete", "exams.manage");
+    case "exams": return any("exams.create", "exams.delete", "exams.manage", "exams.open", "exams.close");
     case "submissions": return any("exams.review");
+    case "archive": return any("exams.review.archive");
+    case "grievances": return any("exams.review.grievances");
     case "blocked": return any("exams.unblock");
     case "chats": return any("chats");
     case "announcements": return any("announcements");

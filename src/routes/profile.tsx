@@ -5,9 +5,10 @@ import { motion } from "framer-motion";
 import { toast } from "sonner";
 import { BadgeCheck, Camera, KeyRound, LogOut, Settings, Trash2 } from "lucide-react";
 import { logoutFn } from "@/lib/server-fns";
-import { changeMyPasswordFn, setMyTitleFn } from "@/lib/account-fns";
+import { changeMyPasswordFn, updateMyDetailsFn } from "@/lib/account-fns";
 import { useMe } from "@/lib/use-me";
 import { Avatar } from "@/components/Avatar";
+import { TransferOwnership } from "@/components/TransferOwnership";
 import { SelfRanksPanel } from "@/components/SelfRanksPanel";
 import { TAB_LABELS, type TabId } from "@/lib/permissions";
 
@@ -42,7 +43,6 @@ function ProfilePage() {
   const [oldPw, setOldPw] = useState("");
   const [newPw, setNewPw] = useState("");
   const [saving, setSaving] = useState(false);
-  const [title, setTitle] = useState<string | null>(null);
   const [avatarBusy, setAvatarBusy] = useState(false);
 
   useEffect(() => {
@@ -87,15 +87,6 @@ function ProfilePage() {
     finally { setAvatarBusy(false); }
   };
 
-  const saveTitle = async () => {
-    try {
-      await setMyTitleFn({ data: title ?? "" });
-      await qc.invalidateQueries({ queryKey: ["me"] });
-      toast.success("تم تغيير اللقب");
-      setTitle(null);
-    } catch (err: any) { toast.error(err.message || "حدث خطأ"); }
-  };
-
   const logout = async () => {
     await logoutFn();
     await qc.invalidateQueries({ queryKey: ["me"] });
@@ -115,40 +106,29 @@ function ProfilePage() {
         <div className="mil-card p-6">
           <div className="flex items-center gap-4 mb-4">
             <div className="relative">
-              <Avatar name={me.owner ? me.display_title || "الأدمن الأساسي" : me.character_name || me.account_name} src={me.avatar} size={72} />
+              <Avatar name={me.character_name || me.account_name} src={me.avatar} size={72} owner={me.owner} />
               <label className={`absolute -bottom-1 -left-1 p-1.5 rounded-full bg-[var(--gold)] text-black cursor-pointer ${avatarBusy ? "opacity-50 pointer-events-none" : ""}`} title="تغيير الصورة">
                 <Camera className="h-4 w-4" />
                 <input type="file" accept="image/jpeg,image/png,image/webp,image/gif" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) changeAvatar(f); e.target.value = ""; }} />
               </label>
             </div>
-            <h1 className="flex-1 text-2xl font-black gold-text">{me.owner ? me.display_title || "الأدمن الأساسي" : me.account_name || "حسابي"}</h1>
+            <h1 className="flex-1 text-2xl font-black gold-text">{me.account_name || "حسابي"}</h1>
             {me.avatar && (
               <button onClick={removeAvatar} disabled={avatarBusy} title="حذف الصورة" className="p-2 text-muted-foreground hover:text-destructive"><Trash2 className="h-4 w-4" /></button>
             )}
           </div>
-          {!me.owner && (
-            <>
-              {row("اسم الحساب", me.account_name)}
-              {row("اسم الشخصية", me.character_name)}
-              {row("الكود العسكري", me.military_code)}
-              {row(me.rank_names.length > 1 ? "الرتب" : "الرتبة", me.rank_names.length ? me.rank_names.join("، ") : me.rank_requested)}
-            </>
-          )}
+          {row("اسم الحساب", me.account_name)}
+          {row("اسم الشخصية", me.character_name)}
+          {row("الكود العسكري", me.military_code)}
+          {(me.rank_names.length > 0 || !me.owner) && row(me.rank_names.length > 1 ? "الرتب" : "الرتبة", me.rank_names.length ? me.rank_names.join("، ") : me.rank_requested)}
           {row("الإيميل", me.email)}
         </div>
 
         <SelfRanksPanel />
 
-        {me.owner && (
-          <div className="mil-card p-6">
-            <h2 className="font-bold mb-1 flex items-center gap-2"><BadgeCheck className="h-4 w-4 text-[var(--gold)]" />اللقب اللي بيظهر ليك</h2>
-            <p className="text-xs text-muted-foreground mb-3">بيظهر بدل «الأدمن الأساسي» في قايمة الأعضاء والسجل. سيبه فاضي للرجوع للاسم الافتراضي.</p>
-            <div className="flex gap-2">
-              <input className="input flex-1" maxLength={40} placeholder="الأدمن الأساسي" value={title ?? me.display_title ?? ""} onChange={(e) => setTitle(e.target.value)} />
-              <button onClick={saveTitle} disabled={title === null} className="btn-gold ripple disabled:opacity-40">حفظ</button>
-            </div>
-          </div>
-        )}
+        {me.owner && <OwnerDetails me={me} />}
+
+        {me.owner && <TransferOwnership />}
 
         <div className="mil-card p-6">
           <h2 className="font-bold mb-3 flex items-center gap-2"><Settings className="h-4 w-4 text-[var(--gold)]" />المتاح ليك في لوحة التحكم</h2>
@@ -173,6 +153,31 @@ function ProfilePage() {
 
         <button onClick={logout} className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-destructive"><LogOut className="h-4 w-4" />تسجيل خروج</button>
       </motion.div>
+    </div>
+  );
+}
+
+function OwnerDetails({ me }: { me: { account_name: string; character_name: string; military_code: string } }) {
+  const qc = useQueryClient();
+  const [f, setF] = useState({ account_name: me.account_name ?? "", character_name: me.character_name ?? "", military_code: me.military_code ?? "" });
+  const [busy, setBusy] = useState(false);
+  const save = async () => {
+    setBusy(true);
+    try {
+      await updateMyDetailsFn({ data: f });
+      await qc.invalidateQueries({ queryKey: ["me"] });
+      toast.success("تم حفظ بياناتك");
+    } catch (e: any) { toast.error(e.message || "حدث خطأ"); } finally { setBusy(false); }
+  };
+  return (
+    <div className="mil-card p-6">
+      <h2 className="font-bold mb-3">بياناتي</h2>
+      <div className="grid gap-3 sm:grid-cols-3">
+        <label className="text-xs text-muted-foreground">اسم الحساب<input className="input mt-1" value={f.account_name} onChange={(e) => setF({ ...f, account_name: e.target.value })} /></label>
+        <label className="text-xs text-muted-foreground">اسم الشخصية<input className="input mt-1" value={f.character_name} onChange={(e) => setF({ ...f, character_name: e.target.value })} /></label>
+        <label className="text-xs text-muted-foreground">الكود العسكري<input className="input mt-1" value={f.military_code} onChange={(e) => setF({ ...f, military_code: e.target.value })} /></label>
+      </div>
+      <button onClick={save} disabled={busy || !f.account_name.trim() || !f.character_name.trim() || !f.military_code.trim()} className="btn-gold ripple mt-3 disabled:opacity-40">{busy ? "جارٍ الحفظ..." : "حفظ"}</button>
     </div>
   );
 }

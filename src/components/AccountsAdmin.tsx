@@ -7,7 +7,7 @@ import {
 } from "lucide-react";
 import {
   requestsListFn, approveRequestFn, rejectRequestFn, pendingRequestsCountFn,
-  membersListFn, setMemberStatusFn, resetMemberPasswordFn, deleteMemberFn, updateMemberDetailsFn, assignMemberFn, setMemberHiddenFn,
+  membersListFn, setMemberStatusFn, resetMemberPasswordFn, deleteMemberFn, updateMemberDetailsFn, updateMyDetailsFn, assignMemberFn, setMemberHiddenFn,
   ranksListFn, saveRankFn, deleteRankFn, reorderRanksFn, setSelfRanksFn, permCatalogFn, auditListFn, loginLogFn,
   type MemberRow, type RankRow,
 } from "@/lib/account-fns";
@@ -194,18 +194,17 @@ export function MembersAdmin() {
         {list.map((m) => (
           <div key={m.id} className={`mil-card p-4 ${m.status === "disabled" ? "opacity-60" : ""} ${m.hidden ? "border-dashed" : ""}`}>
             <div className="flex flex-wrap items-center gap-4">
-              <Avatar name={m.is_owner ? (m.display_title || "الأدمن الأساسي") : m.account_name} src={m.avatar} size={44} />
+              <Avatar name={m.account_name} src={m.avatar} size={44} owner={m.is_owner} />
               <div className="flex-1 min-w-64">
                 <div className="font-bold flex items-center gap-2 flex-wrap">
-                  {m.is_owner ? (m.display_title || "الأدمن الأساسي") : m.account_name}
-                  {m.is_owner && <span className="text-xs px-2 py-0.5 rounded-full border border-[var(--gold)] text-[var(--gold)]">صاحب الموقع</span>}
+                  {m.account_name}
                   {m.rank_names.map((n) => <span key={n} className="text-xs px-2 py-0.5 rounded-full bg-[var(--gold)]/15 text-[var(--gold)]">{n}</span>)}
                   {m.status === "disabled" && <span className="text-xs px-2 py-0.5 rounded-full bg-destructive/20 text-destructive">موقوف</span>}
                   {m.hidden && <span className="text-xs px-2 py-0.5 rounded-full bg-white/10 text-muted-foreground">مخفي — إنت بس اللي شايفه</span>}
                   {m.grants.length > 0 && <span className="text-xs text-muted-foreground">+{m.grants.length} صلاحية فردية</span>}
                 </div>
                 <div className="text-xs text-muted-foreground mt-1">
-                  {!m.is_owner && <>{m.character_name} • {m.military_code} • </>}<span dir="ltr">{m.email}</span>
+                  <>{m.character_name} • {m.military_code} • </><span dir="ltr">{m.email}</span>
                 </div>
               </div>
               <div className="flex gap-1 flex-wrap">
@@ -213,6 +212,9 @@ export function MembersAdmin() {
                   <button title={m.hidden ? "إظهار في قايمة الأعضاء" : "إخفاء من قايمة الأعضاء"} onClick={() => run(() => setMemberHiddenFn({ data: { id: m.id, hidden: !m.hidden } }), m.hidden ? "ظهر في القايمة" : "اتخفى من القايمة")} className="p-2 hover:text-[var(--gold)]">
                     {m.hidden ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
                   </button>
+                )}
+                {m.is_owner && me?.owner && (
+                  <button title="تعديل بياناتي" onClick={() => setDetails(m)} className="p-2 hover:text-[var(--gold)]"><Edit3 className="h-4 w-4" /></button>
                 )}
                 {m.manageable && (
                   <>
@@ -242,7 +244,8 @@ export function MembersAdmin() {
           <Field label="اسم الشخصية"><input className="input" value={details.character_name} onChange={(e) => setDetails({ ...details, character_name: e.target.value })} /></Field>
           <Field label="الكود العسكري"><input className="input" value={details.military_code} onChange={(e) => setDetails({ ...details, military_code: e.target.value })} /></Field>
           <button className="btn-gold ripple inline-flex items-center gap-2" onClick={async () => {
-            await run(() => updateMemberDetailsFn({ data: { id: details.id, account_name: details.account_name, character_name: details.character_name, military_code: details.military_code } }), "تم الحفظ");
+            await run(() => (details.is_owner ? updateMyDetailsFn({ data: { account_name: details.account_name, character_name: details.character_name, military_code: details.military_code } }) : updateMemberDetailsFn({ data: { id: details.id, account_name: details.account_name, character_name: details.character_name, military_code: details.military_code } })), "تم الحفظ");
+            qc.invalidateQueries({ queryKey: ["me"] });
             setDetails(null);
           }}><Save className="h-4 w-4" />حفظ</button>
         </Modal>
@@ -312,7 +315,7 @@ export function RanksAdmin() {
   const canEdit = (r: RankRow) => can("ranks.edit") || (below(r) && (can("ranks.below.rename") || can("ranks.below.perms")));
   const canDel = (r: RankRow) => can("ranks.delete") || (below(r) && can("ranks.below.delete"));
   const selfEnabled = can("ranks.below.self");
-  const canSelf = (r: RankRow) => selfEnabled && below(r);
+  const canSelf = (r: RankRow) => selfEnabled && (!!me?.owner || below(r));
   const globalEdit = can("ranks.edit");
   const nameLocked = !!editing?.id && !globalEdit && !can("ranks.below.rename");
   const permsLocked = !!editing?.id && !globalEdit && !can("ranks.below.perms");
