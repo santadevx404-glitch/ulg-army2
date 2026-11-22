@@ -1,17 +1,19 @@
 // صورة بروفايل (أو أول حرف من الاسم لو مفيش صورة).
-/** تاج مايل فوق صورة صاحب الموقع */
+/** تاج على حافة الدايرة (فوق يمين): قاعدته مماسّة للدايرة وبيدخل جواها شوية */
 function Crown({ size }: { size: number }) {
-  const w = Math.max(12, Math.round(size * 0.34));
+  const w = Math.max(12, Math.round(size * 0.36));
+  const d = size * 0.1464; // بُعد نقطة الزاوية 45° على الحافة عن حرف المربع
   return (
     <svg
-      viewBox="0 0 24 24" width={w} height={w} aria-label="صاحب الموقع"
-      className="absolute drop-shadow-[0_1px_2px_rgba(0,0,0,0.7)] pointer-events-none"
-      style={{ top: size * 0.146 - w * 0.35, right: size * 0.146 - w * 0.35, transform: "rotate(40deg)" }}
+      viewBox="0 0 24 18" width={w} height={w * 0.75} aria-label="صاحب الموقع"
+      className="absolute pointer-events-none drop-shadow-[0_1px_1.5px_rgba(0,0,0,0.8)]"
+      style={{ top: d - w * 0.75, right: d - w / 2, transformOrigin: "50% 100%", transform: "rotate(45deg) translateY(14%)" }}
     >
-      <path d="M3 8l4.5 4L12 5l4.5 7L21 8l-2 11H5L3 8z" fill="#f5c518" stroke="#8a6d00" strokeWidth="1.2" strokeLinejoin="round" />
-      <circle cx="3" cy="8" r="1.6" fill="#f5c518" stroke="#8a6d00" strokeWidth="1" />
-      <circle cx="12" cy="4.6" r="1.6" fill="#f5c518" stroke="#8a6d00" strokeWidth="1" />
-      <circle cx="21" cy="8" r="1.6" fill="#f5c518" stroke="#8a6d00" strokeWidth="1" />
+      <path d="M2 16V6l5.2 4.6L12 2l4.8 8.6L22 6v10z" fill="#f5c518" stroke="#7a5c00" strokeWidth="1.3" strokeLinejoin="round" />
+      <rect x="2" y="13.2" width="20" height="2.8" fill="#d9a400" stroke="#7a5c00" strokeWidth="1" />
+      <circle cx="2" cy="6" r="1.5" fill="#fff3b0" stroke="#7a5c00" strokeWidth="0.8" />
+      <circle cx="12" cy="2" r="1.5" fill="#fff3b0" stroke="#7a5c00" strokeWidth="0.8" />
+      <circle cx="22" cy="6" r="1.5" fill="#fff3b0" stroke="#7a5c00" strokeWidth="0.8" />
     </svg>
   );
 }

@@ -7,7 +7,7 @@ import {
 } from "lucide-react";
 import {
   requestsListFn, approveRequestFn, rejectRequestFn, pendingRequestsCountFn,
-  membersListFn, setMemberStatusFn, resetMemberPasswordFn, deleteMemberFn, updateMemberDetailsFn, assignMemberFn, setMemberHiddenFn,
+  membersListFn, setMemberStatusFn, resetMemberPasswordFn, deleteMemberFn, updateMemberDetailsFn, updateMyDetailsFn, assignMemberFn, setMemberHiddenFn,
   ranksListFn, saveRankFn, deleteRankFn, reorderRanksFn, setSelfRanksFn, permCatalogFn, auditListFn, loginLogFn,
   type MemberRow, type RankRow,
 } from "@/lib/account-fns";
@@ -204,7 +204,7 @@ export function MembersAdmin() {
                   {m.grants.length > 0 && <span className="text-xs text-muted-foreground">+{m.grants.length} صلاحية فردية</span>}
                 </div>
                 <div className="text-xs text-muted-foreground mt-1">
-                  {!m.is_owner && <>{m.character_name} • {m.military_code} • </>}<span dir="ltr">{m.email}</span>
+                  <>{m.character_name} • {m.military_code} • </><span dir="ltr">{m.email}</span>
                 </div>
               </div>
               <div className="flex gap-1 flex-wrap">
@@ -212,6 +212,9 @@ export function MembersAdmin() {
                   <button title={m.hidden ? "إظهار في قايمة الأعضاء" : "إخفاء من قايمة الأعضاء"} onClick={() => run(() => setMemberHiddenFn({ data: { id: m.id, hidden: !m.hidden } }), m.hidden ? "ظهر في القايمة" : "اتخفى من القايمة")} className="p-2 hover:text-[var(--gold)]">
                     {m.hidden ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
                   </button>
+                )}
+                {m.is_owner && me?.owner && (
+                  <button title="تعديل بياناتي" onClick={() => setDetails(m)} className="p-2 hover:text-[var(--gold)]"><Edit3 className="h-4 w-4" /></button>
                 )}
                 {m.manageable && (
                   <>
@@ -241,7 +244,8 @@ export function MembersAdmin() {
           <Field label="اسم الشخصية"><input className="input" value={details.character_name} onChange={(e) => setDetails({ ...details, character_name: e.target.value })} /></Field>
           <Field label="الكود العسكري"><input className="input" value={details.military_code} onChange={(e) => setDetails({ ...details, military_code: e.target.value })} /></Field>
           <button className="btn-gold ripple inline-flex items-center gap-2" onClick={async () => {
-            await run(() => updateMemberDetailsFn({ data: { id: details.id, account_name: details.account_name, character_name: details.character_name, military_code: details.military_code } }), "تم الحفظ");
+            await run(() => (details.is_owner ? updateMyDetailsFn({ data: { account_name: details.account_name, character_name: details.character_name, military_code: details.military_code } }) : updateMemberDetailsFn({ data: { id: details.id, account_name: details.account_name, character_name: details.character_name, military_code: details.military_code } })), "تم الحفظ");
+            qc.invalidateQueries({ queryKey: ["me"] });
             setDetails(null);
           }}><Save className="h-4 w-4" />حفظ</button>
         </Modal>
