@@ -46,7 +46,7 @@ export function OnlineUsers() {
       >
         <span className="flex -space-x-2 space-x-reverse">
           {shown.map((u) => (
-            <span key={u.id} className="rounded-full ring-2 ring-background"><Avatar name={u.account_name} src={u.avatar} size={30} /></span>
+            <span key={u.id} className="rounded-full ring-2 ring-background"><Avatar name={u.account_name} src={u.avatar} size={30} owner={u.is_owner} /></span>
           ))}
         </span>
         {extra > 0 && <span className="text-xs font-bold text-muted-foreground">+{extra}</span>}
@@ -68,7 +68,7 @@ export function OnlineUsers() {
               {users.map((u) => (
                 <div key={u.id} className="flex items-start gap-3 rounded-lg px-2 py-2 hover:bg-white/5">
                   <span className="relative shrink-0">
-                    <Avatar name={u.account_name} src={u.avatar} size={40} />
+                    <Avatar name={u.account_name} src={u.avatar} size={40} owner={u.is_owner} />
                     <span className="absolute bottom-0 left-0 h-3 w-3 rounded-full bg-emerald-500 border-2 border-background" />
                   </span>
                   <div className="min-w-0 flex-1">

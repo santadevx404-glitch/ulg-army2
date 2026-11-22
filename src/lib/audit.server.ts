@@ -104,7 +104,6 @@ export function buildChanges(groups: FieldGroup[], existing: Record<string, unkn
 // ============================== سجل الإدارة ==============================
 
 function actorName(a: AuditActor): string {
-  if (a.owner) return a.user.display_title || "الأدمن الأساسي";
   return a.user.account_name || a.user.email;
 }
 
@@ -119,7 +118,7 @@ export async function logAdmin(
       actor_id: actor.user.id,
       actor_name: actorName(actor),
       actor_email: actor.user.email,
-      actor_rank: actor.owner ? (actor.user.display_title ? null : "صاحب الموقع") : actor.rankNames.join("، ") || null,
+      actor_rank: actor.rankNames.join("، ") || null,
       category: e.category,
       action: e.action,
       summary: clip(e.summary, 200),

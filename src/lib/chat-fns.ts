@@ -69,6 +69,7 @@ export type ChatMessageRow = {
   character: string;
   rank: string;
   avatar: string | null;
+  owner: boolean;
   text: string;
   at: string;
   images: string[];
@@ -100,8 +101,8 @@ export const chatMessagesFn = createServerFn({ method: "POST" })
       const users = await auth.listUsers();
       const avatars = new Map(users.map((u) => [u.id, u.avatar]));
       const topRank = new Map<string, string>();
+      const owners = new Set(users.filter((u) => auth.isOwner(u)).map((u) => u.id));
       for (const u of users) {
-        if (auth.isOwner(u)) continue;
         const name = shownRank(c, u.rank_ids, ranks);
         if (name) topRank.set(u.id, name);
       }
@@ -113,6 +114,7 @@ export const chatMessagesFn = createServerFn({ method: "POST" })
         mentions: m.mentions ?? [],
         mentioned_me: m.author_id !== actor.user.id && ((m.mentions ?? []).some((x) => x.id === actor.user.id) || m.reply_to?.author_id === actor.user.id),
         avatar: avatars.get(m.author_id) ?? null,
+        owner: owners.has(m.author_id),
         rank: topRank.get(m.author_id) ?? m.rank,
         mine: m.author_id === actor.user.id,
         can_delete: m.author_id === actor.user.id || canModerate,
@@ -148,8 +150,7 @@ export const sendMessageFn = createServerFn({ method: "POST" })
 
     const u = actor.user;
     // الرتبة اللي بتظهر جنب الاسم = أعلى رتبة عند الشخص (حسب ترتيب الرتب اللي الأدمن حدده)
-    const rank = actor.owner ? u.display_title || "الأدمن الأساسي" : (shownRank(c, u.rank_ids, await access.listRanks()) ?? "");
-    const shownRankName = actor.owner && !u.character_name ? "" : rank;
+    const shownRankName = shownRank(c, u.rank_ids, await access.listRanks()) ?? "";
     // المنشن: لازم الشخص يكون يقدر يفتح الدردشة دي والاسم يكون مكتوب في النص فعلًا (@الاسم)
     let mentions: chat.Mention[] = [];
     const wanted = [...new Set(data.mentions ?? [])].slice(0, 10);
@@ -160,7 +161,7 @@ export const sendMessageFn = createServerFn({ method: "POST" })
     const msg = await chat.postMessage(c.id, {
       author_id: u.id,
       code: u.military_code,
-      character: u.character_name || (actor.owner ? u.display_title || "الأدمن الأساسي" : u.account_name),
+      character: u.character_name || u.account_name,
       rank: shownRankName,
       text: data.text ?? "",
       images,
@@ -169,13 +170,13 @@ export const sendMessageFn = createServerFn({ method: "POST" })
       mentions,
     });
     // بنرجّع الرسالة كاملة عشان تظهر عند الكاتب فورًا من غير ما يستنى polling
-    return { ...msg, private_images: msg.private_images ?? [], reply_to: msg.reply_to ?? null, mentions: msg.mentions ?? [], mentioned_me: false, avatar: u.avatar ?? null, rank: shownRankName, mine: true, can_delete: true };
+    return { ...msg, private_images: msg.private_images ?? [], reply_to: msg.reply_to ?? null, mentions: msg.mentions ?? [], mentioned_me: false, avatar: u.avatar ?? null, owner: actor.owner, rank: shownRankName, mine: true, can_delete: true };
   });
 
 /** الاسم اللي بيظهر للشخص في الدردشة (وبيتكتب في المنشن). */
 function chatDisplayName(u: auth.User): string {
   if (u.character_name) return u.character_name;
-  return auth.isOwner(u) ? u.display_title || "الأدمن الأساسي" : u.account_name;
+  return u.account_name;
 }
 
 /** كل اللي يقدروا يفتحوا الدردشة دي (صاحب الموقع + أصحاب رتبها) — بيتعمل لهم منشن. */
@@ -183,11 +184,11 @@ async function chatMembers(c: chat.Chat) {
   const users = await auth.listUsers();
   return users
     .filter((u) => u.status === "active" && (auth.isOwner(u) || (c.enabled && c.rank_ids.some((id) => u.rank_ids.includes(id)))))
-    .map((u) => ({ id: u.id, name: chatDisplayName(u), code: u.military_code ?? "", avatar: u.avatar ?? null }))
+    .map((u) => ({ id: u.id, name: chatDisplayName(u), code: u.military_code ?? "", avatar: u.avatar ?? null, owner: auth.isOwner(u) }))
     .filter((m) => !!m.name);
 }
 
-export type ChatMember = { id: string; name: string; code: string; avatar: string | null };
+export type ChatMember = { id: string; name: string; code: string; avatar: string | null; owner: boolean };
 
 export const chatMembersFn = createServerFn({ method: "POST" })
   .validator((d: { chatId: string }) => d)

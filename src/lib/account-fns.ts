@@ -464,8 +464,9 @@ export type OnlineUser = {
   account_name: string;
   character_name: string;
   avatar: string | null;
-  rank_name: string | null; // أعلى رتبة (أو لقب الأدمن الأساسي)
+  rank_name: string | null; // أعلى رتبة
   rank_names: string[];
+  is_owner: boolean;
   military_code: string | null; // بيظهر بس لمن يقدر يشوف بيانات الأعضاء
   page: string; // اسم الصفحة اللي هو فيها
   me: boolean;
@@ -493,8 +494,9 @@ export const presenceFn = createServerFn({ method: "POST" })
         account_name: u.account_name,
         character_name: u.character_name,
         avatar: u.avatar,
-        rank_name: owner ? u.display_title || "الأدمن الأساسي" : mine[0]?.name ?? null,
-        rank_names: owner ? [u.display_title || "الأدمن الأساسي"] : mine.map((r) => r.name),
+        rank_name: mine[0]?.name ?? null,
+        rank_names: mine.map((r) => r.name),
+        is_owner: owner,
         military_code: showCode ? u.military_code : null,
         page: presence.pageLabel(e.path, sections, items),
         me: u.id === actor.user.id,

@@ -201,15 +201,16 @@ function ChatRoom() {
     const tmpId = `${TMP}${Date.now()}-${tmpCounter.current++}`;
     const mentionList: Mention[] = [...picked.current].filter(([, name]) => t.includes(`@${name}`)).map(([mid, name]) => ({ id: mid, name }));
     const replyId = replyTo && !replyTo.id.startsWith(TMP) ? replyTo.id : undefined;
-    const myRank = [...messages].reverse().find((m) => m.mine)?.rank ?? (me.owner ? me.display_title || "الأدمن الأساسي" : me.rank_names[0] ?? "");
+    const myRank = [...messages].reverse().find((m) => m.mine)?.rank ?? (me.rank_names[0] ?? "");
     const optimistic: ChatMessageRow = {
       id: tmpId,
       seq: 1e12 + tmpCounter.current, // دايمًا في الآخر لحد ما السيرفر يدّيها رقمها الحقيقي
       author_id: me.id,
       code: me.military_code ?? "",
-      character: me.character_name || (me.owner ? me.display_title || "الأدمن الأساسي" : me.account_name),
-      rank: me.owner && !me.character_name ? "" : myRank,
+      character: me.character_name || me.account_name,
+      rank: myRank,
       avatar: me.avatar ?? null,
+      owner: me.owner,
       text: t,
       at: new Date().toISOString(),
       images: imgs.map((p) => p.name),
@@ -337,7 +338,7 @@ function ChatRoom() {
         {messages.length === 0 && <div className="text-center text-muted-foreground py-16 text-sm">مفيش رسايل لسه. ابدأ الكلام.</div>}
         {messages.map((m) => (
           <div key={m.id} id={`msg-${m.id}`} className={`group flex gap-3 rounded-lg transition-colors duration-500 ${m.mentioned_me ? "border-r-2 border-[var(--gold)] bg-[var(--gold)]/10 -mx-2 px-2 py-1.5" : ""} ${flashId === m.id ? "!bg-[var(--gold)]/25" : ""}`}>
-            <Avatar name={m.character} src={m.avatar} size={40} />
+            <Avatar name={m.character} src={m.avatar} size={40} owner={m.owner} />
             <div className="flex-1 min-w-0">
               <div className="flex items-baseline gap-2 flex-wrap text-sm">
                 {/* الشكل: [الكود] اسم الشخصية - الرتبة */}
@@ -437,7 +438,7 @@ function ChatRoom() {
             <div className="px-3 py-1.5 text-[11px] text-muted-foreground border-b border-border">منشن — اختار شخص</div>
             {mentionMatches.map((mb, i) => (
               <button key={mb.id} type="button" onMouseDown={(e) => { e.preventDefault(); pickMention(mb); }} onMouseEnter={() => setMentionIdx(i)} className={`flex w-full items-center gap-2 px-3 py-2 text-start text-sm ${i === mentionIdx ? "bg-[var(--gold)]/15" : ""}`}>
-                <Avatar name={mb.name} src={mb.avatar} size={26} />
+                <Avatar name={mb.name} src={mb.avatar} size={26} owner={mb.owner} />
                 <span className="font-bold truncate" dir="auto">{mb.name}</span>
                 {mb.code && <span className="text-xs text-muted-foreground">[{mb.code}]</span>}
               </button>

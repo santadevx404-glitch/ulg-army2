@@ -242,7 +242,7 @@ export async function assignStaff(
   if (rankChanged) {
     // الرتب اللي اتضافت أو اتشالت
     const changedIds = [...rank_ids.filter((id) => !target.rank_ids.includes(id)), ...target.rank_ids.filter((id) => !rank_ids.includes(id))];
-    const generalOk = !self && can(actor, "staff.rank");
+    const generalOk = actor.owner || (!self && can(actor, "staff.rank")); // صاحب الموقع يضيف ويسحب أي رتبة لنفسه ولغيره
     viaBelow = !generalOk;
     if (!generalOk) {
       if (!can(actor, self ? "ranks.below.self" : "ranks.below.others")) throw new Error("ليس لديك صلاحية تغيير الرتب");
@@ -264,7 +264,7 @@ export async function assignStaff(
   // مسار "الرتب الأدنى": الرتبة الأدنى ممكن تكون صلاحياتها أكبر من صلاحياتك طالما معاك صلاحية التحكم فيها
   if (!self && !viaBelow) assertCoversAll(actor, eff, "مينفعش تدّي صلاحيات أكبر من صلاحياتك");
 
-  await auth.updateUserAssignments(targetId, { rank_ids, grants, denies });
+  await auth.updateUserAssignments(targetId, { rank_ids, grants, denies }, { allowOwner: self && actor.owner });
   return { changed: true, before, after };
 }
 

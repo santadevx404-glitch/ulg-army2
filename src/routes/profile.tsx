@@ -5,7 +5,7 @@ import { motion } from "framer-motion";
 import { toast } from "sonner";
 import { BadgeCheck, Camera, KeyRound, LogOut, Settings, Trash2 } from "lucide-react";
 import { logoutFn } from "@/lib/server-fns";
-import { changeMyPasswordFn, setMyTitleFn } from "@/lib/account-fns";
+import { changeMyPasswordFn } from "@/lib/account-fns";
 import { useMe } from "@/lib/use-me";
 import { Avatar } from "@/components/Avatar";
 import { TransferOwnership } from "@/components/TransferOwnership";
@@ -43,7 +43,6 @@ function ProfilePage() {
   const [oldPw, setOldPw] = useState("");
   const [newPw, setNewPw] = useState("");
   const [saving, setSaving] = useState(false);
-  const [title, setTitle] = useState<string | null>(null);
   const [avatarBusy, setAvatarBusy] = useState(false);
 
   useEffect(() => {
@@ -88,15 +87,6 @@ function ProfilePage() {
     finally { setAvatarBusy(false); }
   };
 
-  const saveTitle = async () => {
-    try {
-      await setMyTitleFn({ data: title ?? "" });
-      await qc.invalidateQueries({ queryKey: ["me"] });
-      toast.success("تم تغيير اللقب");
-      setTitle(null);
-    } catch (err: any) { toast.error(err.message || "حدث خطأ"); }
-  };
-
   const logout = async () => {
     await logoutFn();
     await qc.invalidateQueries({ queryKey: ["me"] });
@@ -116,13 +106,13 @@ function ProfilePage() {
         <div className="mil-card p-6">
           <div className="flex items-center gap-4 mb-4">
             <div className="relative">
-              <Avatar name={me.owner ? me.display_title || "الأدمن الأساسي" : me.character_name || me.account_name} src={me.avatar} size={72} />
+              <Avatar name={me.character_name || me.account_name} src={me.avatar} size={72} owner={me.owner} />
               <label className={`absolute -bottom-1 -left-1 p-1.5 rounded-full bg-[var(--gold)] text-black cursor-pointer ${avatarBusy ? "opacity-50 pointer-events-none" : ""}`} title="تغيير الصورة">
                 <Camera className="h-4 w-4" />
                 <input type="file" accept="image/jpeg,image/png,image/webp,image/gif" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) changeAvatar(f); e.target.value = ""; }} />
               </label>
             </div>
-            <h1 className="flex-1 text-2xl font-black gold-text">{me.owner ? me.display_title || "الأدمن الأساسي" : me.account_name || "حسابي"}</h1>
+            <h1 className="flex-1 text-2xl font-black gold-text">{me.account_name || "حسابي"}</h1>
             {me.avatar && (
               <button onClick={removeAvatar} disabled={avatarBusy} title="حذف الصورة" className="p-2 text-muted-foreground hover:text-destructive"><Trash2 className="h-4 w-4" /></button>
             )}
@@ -139,17 +129,6 @@ function ProfilePage() {
         </div>
 
         <SelfRanksPanel />
-
-        {me.owner && (
-          <div className="mil-card p-6">
-            <h2 className="font-bold mb-1 flex items-center gap-2"><BadgeCheck className="h-4 w-4 text-[var(--gold)]" />اللقب اللي بيظهر ليك</h2>
-            <p className="text-xs text-muted-foreground mb-3">بيظهر بدل «الأدمن الأساسي» في قايمة الأعضاء والسجل. سيبه فاضي للرجوع للاسم الافتراضي.</p>
-            <div className="flex gap-2">
-              <input className="input flex-1" maxLength={40} placeholder="الأدمن الأساسي" value={title ?? me.display_title ?? ""} onChange={(e) => setTitle(e.target.value)} />
-              <button onClick={saveTitle} disabled={title === null} className="btn-gold ripple disabled:opacity-40">حفظ</button>
-            </div>
-          </div>
-        )}
 
         {me.owner && <TransferOwnership />}
 

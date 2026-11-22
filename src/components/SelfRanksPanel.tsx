@@ -9,11 +9,12 @@ import { useMe } from "@/lib/use-me";
 export function SelfRanksPanel() {
   const qc = useQueryClient();
   const { me, can } = useMe();
-  const enabled = !!me && can("ranks.below.self");
+  const isOwner = !!me?.owner;
+  const enabled = !!me && (isOwner || can("ranks.below.self"));
   const { data: ranks = [] } = useQuery({ queryKey: ["admin-ranks"], queryFn: () => ranksListFn(), enabled });
   const top = me?.top_rank_order ?? null;
   const mine = me?.rank_ids ?? [];
-  const below = ranks.filter((r) => top !== null && r.order > top);
+  const below = isOwner ? ranks : ranks.filter((r) => top !== null && r.order > top); // صاحب الموقع: كل الرتب
   const belowIds = below.map((r) => r.id);
 
   // الاختيار الحالي بين الرتب الأدنى بس (رتبك العليا ثابتة ومش بتتغير من هنا)
@@ -55,9 +56,9 @@ export function SelfRanksPanel() {
     <div className="mil-card p-6">
       <h2 className="font-bold mb-1 flex items-center gap-2"><UserCog className="h-5 w-5 text-[var(--gold)]" />رتبي</h2>
       <p className="text-xs text-muted-foreground mb-4 leading-loose">
-        اختر من القائمة الرتب الأدنى من أعلى رتبة تشغلها لإضافتها إلى حسابك. رتبتك الحالية: <b className="text-foreground">{me.rank_names.join("، ") || "—"}</b>
+        {isOwner ? "اختر من القائمة أي رتبة لإضافتها إلى حسابك أو إزالتها منه." : "اختر من القائمة الرتب الأدنى من أعلى رتبة تشغلها لإضافتها إلى حسابك."} رتبتك الحالية: <b className="text-foreground">{me.rank_names.join("، ") || "—"}</b>
       </p>
-      {top === null ? (
+      {top === null && !isOwner ? (
         <div className="text-sm text-muted-foreground">لا توجد رتبة مسندة إلى حسابك، لذلك لا توجد رتب أدنى منها.</div>
       ) : below.length === 0 ? (
         <div className="text-sm text-muted-foreground">لا توجد رتب أدنى من رتبتك حاليًا.</div>

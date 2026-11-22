@@ -460,11 +460,12 @@ export async function updateUserDetails(
 export async function updateUserAssignments(
   id: string,
   a: { rank_ids: string[]; grants: string[]; denies: string[] },
+  opts: { allowOwner?: boolean } = {}, // صاحب الموقع يعدّل رتب نفسه
 ): Promise<void> {
   await withLock(async () => {
     const users = await readUsers();
     const u = mustFind(users, id);
-    notOwner(u);
+    if (!opts.allowOwner) notOwner(u);
     u.rank_ids = a.rank_ids;
     u.grants = a.grants;
     u.denies = a.denies;

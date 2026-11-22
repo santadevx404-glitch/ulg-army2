@@ -194,11 +194,10 @@ export function MembersAdmin() {
         {list.map((m) => (
           <div key={m.id} className={`mil-card p-4 ${m.status === "disabled" ? "opacity-60" : ""} ${m.hidden ? "border-dashed" : ""}`}>
             <div className="flex flex-wrap items-center gap-4">
-              <Avatar name={m.is_owner ? (m.display_title || "الأدمن الأساسي") : m.account_name} src={m.avatar} size={44} />
+              <Avatar name={m.account_name} src={m.avatar} size={44} owner={m.is_owner} />
               <div className="flex-1 min-w-64">
                 <div className="font-bold flex items-center gap-2 flex-wrap">
-                  {m.is_owner ? (m.display_title || "الأدمن الأساسي") : m.account_name}
-                  {m.is_owner && <span className="text-xs px-2 py-0.5 rounded-full border border-[var(--gold)] text-[var(--gold)]">صاحب الموقع</span>}
+                  {m.account_name}
                   {m.rank_names.map((n) => <span key={n} className="text-xs px-2 py-0.5 rounded-full bg-[var(--gold)]/15 text-[var(--gold)]">{n}</span>)}
                   {m.status === "disabled" && <span className="text-xs px-2 py-0.5 rounded-full bg-destructive/20 text-destructive">موقوف</span>}
                   {m.hidden && <span className="text-xs px-2 py-0.5 rounded-full bg-white/10 text-muted-foreground">مخفي — إنت بس اللي شايفه</span>}
@@ -312,7 +311,7 @@ export function RanksAdmin() {
   const canEdit = (r: RankRow) => can("ranks.edit") || (below(r) && (can("ranks.below.rename") || can("ranks.below.perms")));
   const canDel = (r: RankRow) => can("ranks.delete") || (below(r) && can("ranks.below.delete"));
   const selfEnabled = can("ranks.below.self");
-  const canSelf = (r: RankRow) => selfEnabled && below(r);
+  const canSelf = (r: RankRow) => selfEnabled && (!!me?.owner || below(r));
   const globalEdit = can("ranks.edit");
   const nameLocked = !!editing?.id && !globalEdit && !can("ranks.below.rename");
   const permsLocked = !!editing?.id && !globalEdit && !can("ranks.below.perms");
