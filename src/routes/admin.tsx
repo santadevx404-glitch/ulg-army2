@@ -15,7 +15,7 @@ import {
   saveTopicFn,
   deleteTopicFn,
 } from "@/lib/server-fns";
-import { ExamsAdmin, SubmissionsAdmin, BlockedAdmin, useBlockedCount } from "@/components/ExamsAdmin";
+import { ExamsAdmin, SubmissionsAdmin, ArchiveAdmin, GrievancesAdmin, useOpenGrievancesCount, BlockedAdmin, useBlockedCount } from "@/components/ExamsAdmin";
 import { RequestsAdmin, MembersAdmin, RanksAdmin, LogAdmin, usePendingRequestsCount } from "@/components/AccountsAdmin";
 import { ChatsAdmin } from "@/components/ChatsAdmin";
 import { StorageStatus } from "@/components/StorageStatus";
@@ -35,6 +35,7 @@ function AdminPage() {
   const { me, loading } = useMe();
   const [tab, setTab] = useState<TabId | null>(null);
   const blockedCount = useBlockedCount();
+  const grievancesCount = useOpenGrievancesCount();
   const requestsCount = usePendingRequestsCount();
 
   useEffect(() => {
@@ -65,7 +66,7 @@ function AdminPage() {
 
       <div className="flex flex-wrap gap-2 mb-6 border-b border-border">
         {tabs.map((t) => {
-          const badge = t === "blocked" ? blockedCount : t === "requests" ? requestsCount : 0;
+          const badge = t === "blocked" ? blockedCount : t === "requests" ? requestsCount : t === "grievances" ? grievancesCount : 0;
           return (
             <button key={t} onClick={() => setTab(t)}
               className={`px-5 py-3 font-semibold transition inline-flex items-center gap-2 ${active === t ? "text-[var(--gold)] border-b-2 border-[var(--gold)]" : "text-muted-foreground hover:text-foreground"}`}>
@@ -82,6 +83,8 @@ function AdminPage() {
       {active === "items" && <ItemsAdmin />}
       {active === "exams" && <ExamsAdmin />}
       {active === "submissions" && <SubmissionsAdmin />}
+      {active === "archive" && <ArchiveAdmin />}
+      {active === "grievances" && <GrievancesAdmin />}
       {active === "blocked" && <BlockedAdmin />}
       {active === "chats" && <ChatsAdmin />}
       {active === "announcements" && <AnnouncementsAdmin />}

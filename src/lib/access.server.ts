@@ -143,9 +143,12 @@ export async function saveRank(actor: Actor, input: { id?: string; name: string;
     if (ranks.some((r) => r.id !== input.id && r.name.toLowerCase() === name.toLowerCase())) {
       throw new Error("في رتبة بنفس الاسم");
     }
-    assertCoversAll(actor, permissions, "مينفعش تدّي رتبة صلاحيات أكبر من صلاحياتك");
     const now = new Date().toISOString();
     const idx = input.id ? ranks.findIndex((r) => r.id === input.id) : -1;
+    // مسار الإدارة العامة: كل الصلاحيات لازم تكون ضمن صلاحياتك.
+    // مسار "الرتب الأدنى": الصلاحيات الموجودة أصلًا في الرتبة تفضل زي ما هي حتى لو أكبر منك، والجديدة بس لازم تكون ضمن صلاحياتك.
+    const already = idx >= 0 ? ranks[idx].permissions : [];
+    assertCoversAll(actor, globalOk ? permissions : permissions.filter((k) => !already.includes(k)), "مينفعش تضيف للرتبة صلاحيات مش عندك");
     if (!globalOk) {
       // مسار "الرتب اللي تحت رتبتي"
       if (topRankOrder(actor) === null) throw new Error(NEED_RANK);
@@ -159,7 +162,7 @@ export async function saveRank(actor: Actor, input: { id?: string; name: string;
       }
     }
     if (idx >= 0) {
-      assertCoversAll(actor, ranks[idx].permissions, "مينفعش تعدّل رتبة صلاحياتها أكبر من صلاحياتك");
+      if (globalOk) assertCoversAll(actor, ranks[idx].permissions, "مينفعش تعدّل رتبة صلاحياتها أكبر من صلاحياتك");
       ranks[idx] = { ...ranks[idx], name, permissions, updated_at: now };
       await writeRanks(ranks);
       return ranks[idx];
@@ -182,7 +185,7 @@ export async function deleteRank(actor: Actor, id: string): Promise<{ affected: 
       if (topRankOrder(actor) === null) throw new Error(NEED_RANK);
       if (!isBelowTop(actor, r)) throw new Error("تقدر تمسح بس الرتب اللي تحت أعلى رتبة عندك");
     }
-    assertCoversAll(actor, r.permissions, "مينفعش تمسح رتبة صلاحياتها أكبر من صلاحياتك");
+    if (globalOk) assertCoversAll(actor, r.permissions, "مينفعش تمسح رتبة صلاحياتها أكبر من صلاحياتك");
     await writeRanks(ranks.filter((x) => x.id !== id));
     return r.name;
   });
@@ -228,6 +231,7 @@ export async function assignStaff(
   const grants = self ? target.grants : sanitizeKeys(next.grants);
   const denies = self ? target.denies : sanitizeKeys(next.denies);
 
+  let viaBelow = false;
   const rankChanged = !sameSet(rank_ids, target.rank_ids);
   const grantChanged = !sameSet(grants, target.grants) || !sameSet(denies, target.denies);
   const nameOf = (ids: string[]) => ids.map((id) => all.find((r) => r.id === id)?.name ?? "(رتبة محذوفة)");
@@ -239,6 +243,7 @@ export async function assignStaff(
     // الرتب اللي اتضافت أو اتشالت
     const changedIds = [...rank_ids.filter((id) => !target.rank_ids.includes(id)), ...target.rank_ids.filter((id) => !rank_ids.includes(id))];
     const generalOk = !self && can(actor, "staff.rank");
+    viaBelow = !generalOk;
     if (!generalOk) {
       if (!can(actor, self ? "ranks.below.self" : "ranks.below.others")) throw new Error("ليس لديك صلاحية تغيير الرتب");
       if (topRankOrder(actor) === null) throw new Error(NEED_RANK);
@@ -248,19 +253,16 @@ export async function assignStaff(
         if (!isBelowTop(actor, r)) throw new Error("تقدر تضيف أو تشيل بس الرتب اللي تحت أعلى رتبة عندك");
       }
     }
-    if (self) {
-      // مينفعش تدّي نفسك رتبة صلاحياتها أكبر من صلاحياتك
-      for (const id of rank_ids.filter((x) => !target.rank_ids.includes(x))) {
-        const r = all.find((x) => x.id === id)!;
-        assertCoversAll(actor, r.permissions, "الرتبة دي صلاحياتها أكبر من صلاحياتك");
-      }
-    }
   }
-  if (grantChanged) assertCan(actor, "staff.grant");
+  if (grantChanged) {
+    assertCan(actor, "staff.grant");
+    assertCoversAll(actor, grants.filter((g) => !target.grants.includes(g)), "مينفعش تدّي صلاحيات أكبر من صلاحياتك");
+  }
 
   // الصلاحيات الفعلية بعد التعديل لازم تكون كلها ضمن صلاحيات اللي بيعدّل
   const eff = effectivePerms({ ...target, grants, denies }, nextRanks as Rank[]);
-  if (!self) assertCoversAll(actor, eff, "مينفعش تدّي صلاحيات أكبر من صلاحياتك");
+  // مسار "الرتب الأدنى": الرتبة الأدنى ممكن تكون صلاحياتها أكبر من صلاحياتك طالما معاك صلاحية التحكم فيها
+  if (!self && !viaBelow) assertCoversAll(actor, eff, "مينفعش تدّي صلاحيات أكبر من صلاحياتك");
 
   await auth.updateUserAssignments(targetId, { rank_ids, grants, denies });
   return { changed: true, before, after };

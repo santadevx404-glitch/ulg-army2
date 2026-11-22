@@ -8,6 +8,8 @@ import { logoutFn } from "@/lib/server-fns";
 import { changeMyPasswordFn, setMyTitleFn } from "@/lib/account-fns";
 import { useMe } from "@/lib/use-me";
 import { Avatar } from "@/components/Avatar";
+import { TransferOwnership } from "@/components/TransferOwnership";
+import { SelfRanksPanel } from "@/components/SelfRanksPanel";
 import { TAB_LABELS, type TabId } from "@/lib/permissions";
 
 /** بيقص الصورة مربعة من النص ويصغّرها 512px ويحوّلها JPEG عشان تبقى خفيفة. */
@@ -136,6 +138,8 @@ function ProfilePage() {
           {row("الإيميل", me.email)}
         </div>
 
+        <SelfRanksPanel />
+
         {me.owner && (
           <div className="mil-card p-6">
             <h2 className="font-bold mb-1 flex items-center gap-2"><BadgeCheck className="h-4 w-4 text-[var(--gold)]" />اللقب اللي بيظهر ليك</h2>
@@ -146,6 +150,8 @@ function ProfilePage() {
             </div>
           </div>
         )}
+
+        {me.owner && <TransferOwnership />}
 
         <div className="mil-card p-6">
           <h2 className="font-bold mb-3 flex items-center gap-2"><Settings className="h-4 w-4 text-[var(--gold)]" />المتاح ليك في لوحة التحكم</h2>

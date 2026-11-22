@@ -3,12 +3,13 @@ import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
-  Plus, Trash2, Edit3, Save, ListChecks, Link2, Eye, EyeOff, Search, Unlock, RotateCcw, FileText, ArrowRight, Layers, ClipboardCheck, CheckCircle2, XCircle,
+  Plus, Trash2, Edit3, Save, ListChecks, Link2, Eye, EyeOff, Search, Unlock, RotateCcw, FileText, ArrowRight, Layers, ClipboardCheck, CheckCircle2, XCircle, Archive, MessageSquareWarning,
 } from "lucide-react";
 import {
   adminExamsFn, adminSaveExamFn, adminDeleteExamFn,
   adminQuestionsFn, adminSaveQuestionFn, adminDeleteQuestionsFn, adminBulkQuestionsFn,
   adminAttemptsFn, adminAttemptFn, adminGradeAttemptFn, adminUnblockFn, adminRetakeFn, adminDeleteAttemptsFn,
+  adminArchiveFn, adminArchiveListFn, adminArchiveItemFn, adminGradeArchiveFn, adminRestoreArchiveFn, ownerDeleteArchiveFn, adminGrievancesFn, adminResolveGrievanceFn,
 } from "@/lib/exam-fns";
 import { BypassPicker } from "@/components/BypassPicker";
 import { NO_ERRORS, formatAnswer, parseTfFix } from "@/lib/answer-format";
@@ -581,9 +582,20 @@ export function SubmissionsAdmin() {
     refresh();
   };
   const del = async (id: string) => {
-    if (!confirm("حذف المحاولة نهائيًا؟")) return;
+    const a = attempts.find((x) => x.id === id);
+    const submitted = a && (a.status === "submitted" || a.status === "retired");
+    if (!confirm(submitted ? "حذف التسليم من القايمة؟ هيتأرشف تلقائيًا وصاحبه يفضل يشوف أخطاءه." : "حذف المحاولة نهائيًا؟")) return;
     await adminDeleteAttemptsFn({ data: [id] });
+    qc.invalidateQueries({ queryKey: ["admin-archive"] });
     refresh();
+  };
+  const archive = async (id: string) => {
+    try {
+      await adminArchiveFn({ data: [id] });
+      toast.success("اتأرشف — النسخة بتتحدّث تلقائي مع أي تعديل");
+      qc.invalidateQueries({ queryKey: ["admin-archive"] });
+      refresh();
+    } catch (e: any) { toast.error(e.message || "حدث خطأ"); }
   };
 
   return (
@@ -616,7 +628,10 @@ export function SubmissionsAdmin() {
             {a.status === "submitted" && can("exams.unblock", { exam: a.exam_id }) && (
               <button onClick={() => retake(a.id)} title="السماح بمحاولة جديدة" className="p-2 hover:text-[var(--gold)]"><RotateCcw className="h-4 w-4" /></button>
             )}
-            {can("exams.review.delete", { exam: a.exam_id }) && <button onClick={() => del(a.id)} className="p-2 hover:text-destructive"><Trash2 className="h-4 w-4" /></button>}
+            {(a.status === "submitted" || a.status === "retired") && can("exams.review.archive", { exam: a.exam_id }) && (
+              <button onClick={() => archive(a.id)} title={a.archived ? "تحديث نسخة الأرشيف" : "أرشفة (من غير حذف)"} className={`p-2 hover:text-sky-400 ${a.archived ? "text-sky-400" : ""}`}><Archive className="h-4 w-4" /></button>
+            )}
+            {can("exams.review.delete", { exam: a.exam_id }) && <button onClick={() => del(a.id)} title="حذف (بيتأرشف تلقائيًا لو متسلّم)" className="p-2 hover:text-destructive"><Trash2 className="h-4 w-4" /></button>}
           </AttemptRow>
         ))}
       </div>
@@ -636,6 +651,8 @@ function AttemptRow({ a, children }: { a: AdminAttemptRow; children?: React.Reac
           {a.block_code && <> • <span dir="ltr" className="font-mono">{a.block_code}</span></>}
           {a.violations > 0 && <> • <span className="text-orange-500">مخالفات {a.violations}</span></>}
           {a.zeroed > 0 && <> • <span className="text-destructive">{a.zeroed} سؤال اتصفّر</span></>}
+          {a.archived && <> • <span className="text-sky-400">مؤرشف</span></>}
+          {a.grievances_open > 0 && <> • <span className="rounded-full bg-amber-500 text-black px-2 py-0.5 font-bold">⚑ تظلم ({a.grievances_open})</span></>}
         </div>
         <div className="text-xs text-muted-foreground">
           جاوب {a.answered}/{a.total} • بدأ {fmt(a.started_at)}
@@ -648,9 +665,9 @@ function AttemptRow({ a, children }: { a: AdminAttemptRow; children?: React.Reac
   );
 }
 
-function AttemptModal({ id, canGrade, onClose }: { id: string; canGrade: boolean; onClose: () => void }) {
+function AttemptModal({ id, canGrade, onClose, archive = false }: { id: string; canGrade: boolean; onClose: () => void; archive?: boolean }) {
   const qc = useQueryClient();
-  const { data, isLoading } = useQuery({ queryKey: ["admin-attempt", id], queryFn: () => adminAttemptFn({ data: id }) });
+  const { data, isLoading } = useQuery({ queryKey: [archive ? "admin-archive-item" : "admin-attempt", id], queryFn: () => (archive ? adminArchiveItemFn({ data: id }) : adminAttemptFn({ data: id })) });
   const [scores, setScores] = useState<Record<string, string>>({});
   const [fbs, setFbs] = useState<Record<string, string>>({});
   const [init, setInit] = useState(false);
@@ -686,16 +703,17 @@ function AttemptModal({ id, canGrade, onClose }: { id: string; canGrade: boolean
     }
     setSaving(true);
     try {
-      const r = await adminGradeAttemptFn({ data: { id, scores, feedback: fbs } });
+      const r = await (archive ? adminGradeArchiveFn : adminGradeAttemptFn)({ data: { id, scores, feedback: fbs } });
       toast.success(`اتحفظ التصحيح: ${r.total}/${r.max}`);
-      qc.invalidateQueries({ queryKey: ["admin-attempt", id] });
+      qc.invalidateQueries({ queryKey: [archive ? "admin-archive-item" : "admin-attempt", id] });
       qc.invalidateQueries({ queryKey: ["admin-attempts"] });
+      qc.invalidateQueries({ queryKey: ["admin-archive"] });
       onClose();
     } catch (e: any) { toast.error(e.message || "حدث خطأ"); } finally { setSaving(false); }
   };
 
   return (
-    <Modal wide onClose={onClose} title={gradable ? "تصحيح المحاولة" : "إجابات المحاولة"}>
+    <Modal wide onClose={onClose} title={(archive ? "[أرشيف] " : "") + (gradable ? "تصحيح المحاولة" : "إجابات المحاولة")}>
       {isLoading && <div className="text-muted-foreground">جارٍ التحميل...</div>}
       {data && (
         <div>
@@ -706,6 +724,13 @@ function AttemptModal({ id, canGrade, onClose }: { id: string; canGrade: boolean
             الدرجة: <span className="font-black text-[var(--gold)] text-lg" dir="ltr">{total} / {max}</span>
             <span className="text-xs text-muted-foreground mr-3">{data.grading === "auto" ? "تصحيح تلقائي للاختيارات" : "تصحيح يدوي"}</span>
           </div>
+          {data.archived && !archive && <div className="mb-3 text-xs text-sky-400">للتسليم ده نسخة في الأرشيف — أي تعديل هنا بيتنقل لنسختها تلقائيًا.</div>}
+          {data.grievances.length > 0 && (
+            <div className="mb-4 rounded-lg border border-amber-500/60 bg-amber-500/10 p-3 text-sm">
+              <div className="font-bold text-amber-500 mb-1">⚑ تظلمات على التسليم ({data.grievances.filter((g) => g.status === "open").length} مفتوح من {data.grievances.length}) — الأسئلة المتظلَّم عليها متعلّمة بالأصفر تحت</div>
+              <div className="text-xs text-muted-foreground">الرد على التظلمات من تبويب «التظلمات».</div>
+            </div>
+          )}
           {data.attempt.violations > 0 && (
             <div className="mb-4 rounded-lg border border-destructive/50 bg-destructive/10 p-3 text-sm">
               <div className="font-bold text-destructive mb-1">مخالفات تبديل التاب: {data.attempt.violations}</div>
@@ -721,7 +746,13 @@ function AttemptModal({ id, canGrade, onClose }: { id: string; canGrade: boolean
           )}
           <div className="space-y-4">
             {data.items.map((it, i) => (
-              <div key={it.id} className={`rounded-lg border p-4 ${it.violation ? "border-2 border-destructive bg-destructive/5" : "border-border"}`}>
+              <div key={it.id} className={`rounded-lg border p-4 ${it.violation ? "border-2 border-destructive bg-destructive/5" : data.grievances.some((g) => g.qid === it.id && g.status === "open") ? "border-2 border-amber-500 bg-amber-500/5" : "border-border"}`}>
+                {data.grievances.filter((g) => g.qid === it.id).map((g) => (
+                  <div key={g.id} className="mb-3 rounded-md bg-amber-500/15 px-3 py-2 text-sm">
+                    <b className="text-amber-500">⚑ تظلم {g.status === "open" ? "(مفتوح)" : g.status === "accepted" ? "(مقبول)" : "(مرفوض)"}:</b> <span className="whitespace-pre-wrap">{g.message}</span>
+                    {g.response && <div className="mt-1 text-xs text-muted-foreground">الرد: {g.response}</div>}
+                  </div>
+                ))}
                 {it.violation === "zeroed" && (
                   <div className="mb-3 rounded-md bg-destructive/15 px-3 py-2 text-sm font-bold text-destructive">⚠ اتصفّر السؤال ده تلقائيًا بسبب مخالفة (تبديل التاب) ومفيش بديل متاح.</div>
                 )}
@@ -887,6 +918,142 @@ export function BlockedAdmin() {
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+// ============================== الأرشيف ==============================
+
+const sourceLabel: Record<string, string> = { manual: "أرشفة يدوية", auto_delete: "اتأرشف تلقائي (اتحذف من التسليمات)", auto_exam_delete: "اتأرشف تلقائي (اتحذف الاختبار)" };
+
+export function ArchiveAdmin() {
+  const qc = useQueryClient();
+  const { can, me } = useMe() as ReturnType<typeof useMe> & { me: { owner?: boolean } | null };
+  const { data: rows = [], refetch } = useQuery({ queryKey: ["admin-archive"], queryFn: () => adminArchiveListFn(), refetchInterval: 10000 });
+  const [search, setSearch] = useState("");
+  const [viewId, setViewId] = useState<string | null>(null);
+  const shown = rows.filter((r) => !search.trim() || (r.identity + " " + Object.values(r.fields).join(" ") + " " + r.exam_title).toLowerCase().includes(search.trim().toLowerCase()));
+
+  const refresh = () => { refetch(); qc.invalidateQueries({ queryKey: ["admin-attempts"] }); qc.invalidateQueries({ queryKey: ["admin-grievances"] }); };
+  const restore = async (id: string, regrade: boolean) => {
+    if (!confirm(regrade ? "رجوع التسليم لقايمة التسليمات وتصفير تصحيحه عشان يتصحح من جديد؟" : "رجوع التسليم لقايمة التسليمات؟ (النسخة هتفضل في الأرشيف)")) return;
+    try {
+      const r = await adminRestoreArchiveFn({ data: { id, regrade } });
+      toast.success(r.restored ? "اتسترجع للتسليمات" : regrade ? "اتصفّر التصحيح — جاهز لإعادة التصحيح" : "التسليم موجود بالفعل في التسليمات");
+      refresh();
+    } catch (e: any) { toast.error(e.message || "حدث خطأ"); }
+  };
+  const wipe = async (id: string) => {
+    if (!confirm("مسح نهائي من الأرشيف؟ الطالب مش هيقدر يشوف أخطاءه بعد كده. مفيش رجوع.")) return;
+    try { await ownerDeleteArchiveFn({ data: [id] }); toast.success("اتمسح من الأرشيف"); refresh(); } catch (e: any) { toast.error(e.message || "حدث خطأ"); }
+  };
+
+  return (
+    <div>
+      <p className="text-sm text-muted-foreground mb-3 leading-loose">
+        أي تسليم بيتحذف بيتأرشف هنا تلقائيًا، وتقدر تأرشف يدويًا من غير حذف. النسخة بتتحدّث لو التسليم اتعدّل، والطالب بيفضل يشوف أخطاءه ويتظلم عليها. <b>المسح النهائي من الأرشيف لصاحب الموقع بس.</b>
+      </p>
+      <div className="flex flex-wrap gap-2 mb-4">
+        <div className="relative">
+          <Search className="h-4 w-4 absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+          <input className="input !pr-9" placeholder="بحث بالاسم أو الاختبار" value={search} onChange={(e) => setSearch(e.target.value)} />
+        </div>
+        <div className="mr-auto text-sm text-muted-foreground self-center">{shown.length} نسخة</div>
+      </div>
+      <div className="grid gap-2">
+        {shown.length === 0 && <div className="text-muted-foreground text-sm">الأرشيف فاضي.</div>}
+        {shown.map((r) => (
+          <div key={r.id} className="mil-card p-3 flex flex-wrap items-center gap-3">
+            <div className="flex-1 min-w-56">
+              <div className="font-bold">{Object.values(r.fields).join(" — ")}</div>
+              <div className="text-xs text-muted-foreground mt-1">
+                {r.exam_title} • محاولة {r.attempt_no} • {r.graded ? <span className="text-emerald-500 font-bold">{r.score}/{r.max}</span> : <span className="text-amber-500">لسه مصححش</span>}
+                {r.in_submissions ? <> • <span className="text-[var(--gold)]">موجود في التسليمات</span></> : <> • <span className="text-sky-400">خارج التسليمات</span></>}
+                {r.grievances_open > 0 && <> • <span className="rounded-full bg-amber-500 text-black px-2 py-0.5 font-bold">⚑ تظلم ({r.grievances_open})</span></>}
+              </div>
+              <div className="text-xs text-muted-foreground">{sourceLabel[r.source]} • {fmt(r.archived_at)}{r.updated_at !== r.archived_at && ` • آخر تحديث ${fmt(r.updated_at)}`}</div>
+            </div>
+            <button onClick={() => setViewId(r.id)} className="px-3 py-1.5 rounded-md border border-[var(--gold)] text-[var(--gold)] text-sm inline-flex items-center gap-2"><ClipboardCheck className="h-4 w-4" />عرض / تصحيح</button>
+            {!r.in_submissions && <button onClick={() => restore(r.id, false)} className="px-3 py-1.5 rounded-md border border-border hover:border-[var(--gold)] text-sm inline-flex items-center gap-2"><RotateCcw className="h-4 w-4" />رجّعه للتسليمات</button>}
+            <button onClick={() => restore(r.id, true)} className="px-3 py-1.5 rounded-md border border-border hover:border-[var(--gold)] text-sm">رجّعه وأعد التصحيح</button>
+            {me?.owner && <button onClick={() => wipe(r.id)} title="مسح نهائي (صاحب الموقع)" className="p-2 hover:text-destructive"><Trash2 className="h-4 w-4" /></button>}
+          </div>
+        ))}
+      </div>
+      {viewId && <AttemptModal archive id={viewId} canGrade={can("exams.review.grade", { exam: rows.find((r) => r.id === viewId)?.exam_id ?? "" })} onClose={() => { setViewId(null); refresh(); }} />}
+    </div>
+  );
+}
+
+// ============================== التظلمات ==============================
+
+export function useOpenGrievancesCount() {
+  const { canAny } = useMe();
+  const { data = [] } = useQuery({ queryKey: ["admin-grievances"], queryFn: () => adminGrievancesFn(), enabled: canAny("exams.review.grievances"), refetchInterval: 10000 });
+  return data.filter((g) => g.status === "open").length;
+}
+
+export function GrievancesAdmin() {
+  const qc = useQueryClient();
+  const { can } = useMe();
+  const { data: list = [], refetch } = useQuery({ queryKey: ["admin-grievances"], queryFn: () => adminGrievancesFn(), refetchInterval: 10000 });
+  const { data: archive = [] } = useQuery({ queryKey: ["admin-archive"], queryFn: () => adminArchiveListFn(), retry: false });
+  const { data: attempts = [] } = useQuery(attemptsQuery);
+  const [filter, setFilter] = useState<"open" | "all">("open");
+  const [resp, setResp] = useState<Record<string, string>>({});
+  const [view, setView] = useState<{ id: string; archive: boolean; exam: string } | null>(null);
+  const shown = list.filter((g) => filter === "all" || g.status === "open");
+
+  const resolve = async (id: string, status: "open" | "accepted" | "rejected") => {
+    try {
+      await adminResolveGrievanceFn({ data: { id, status, response: resp[id] ?? list.find((g) => g.id === id)?.response ?? "" } });
+      toast.success(status === "accepted" ? "اتقبل التظلم" : status === "rejected" ? "اترفض التظلم" : "اتفتح التظلم تاني");
+      refetch();
+      qc.invalidateQueries({ queryKey: ["admin-archive"] });
+    } catch (e: any) { toast.error(e.message || "حدث خطأ"); }
+  };
+  const open = (g: { attempt_id: string; exam_id: string }) => {
+    const live = attempts.some((a) => a.id === g.attempt_id);
+    if (live) setView({ id: g.attempt_id, archive: false, exam: g.exam_id });
+    else if (archive.some((a) => a.id === g.attempt_id)) setView({ id: g.attempt_id, archive: true, exam: g.exam_id });
+    else toast.error("مفيش صلاحية لعرض التسليم ده");
+  };
+
+  return (
+    <div>
+      <div className="flex gap-2 mb-4">
+        <button onClick={() => setFilter("open")} className={`px-4 py-1.5 rounded-full border text-sm ${filter === "open" ? "border-[var(--gold)] text-[var(--gold)]" : "border-border"}`}>المفتوحة</button>
+        <button onClick={() => setFilter("all")} className={`px-4 py-1.5 rounded-full border text-sm ${filter === "all" ? "border-[var(--gold)] text-[var(--gold)]" : "border-border"}`}>الكل</button>
+        <div className="mr-auto text-sm text-muted-foreground self-center">{shown.length} تظلم</div>
+      </div>
+      <div className="grid gap-3">
+        {shown.length === 0 && <div className="text-muted-foreground text-sm">مفيش تظلمات.</div>}
+        {shown.map((g) => (
+          <div key={g.id} className={`mil-card p-4 ${g.status === "open" ? "border border-amber-500/60" : ""}`}>
+            <div className="flex flex-wrap items-center gap-2 mb-2">
+              <MessageSquareWarning className="h-4 w-4 text-amber-500" />
+              <b>{g.identity}</b>
+              <span className="text-xs text-muted-foreground">• {g.exam_title} • {fmt(g.created_at)}</span>
+              <span className={`mr-auto text-xs px-2 py-0.5 rounded-full ${g.status === "open" ? "bg-amber-500 text-black" : g.status === "accepted" ? "bg-emerald-500/20 text-emerald-500" : "bg-destructive/20 text-destructive"}`}>{g.status === "open" ? "مفتوح" : g.status === "accepted" ? "مقبول" : "مرفوض"}</span>
+            </div>
+            <div className="text-xs text-muted-foreground mb-1">على: {g.qid ? `«${g.q_text.slice(0, 160)}»` : "التسليم بشكل عام"}</div>
+            <div className="rounded-md bg-white/5 p-3 text-sm whitespace-pre-wrap mb-3">{g.message}</div>
+            {can("exams.review.grievances", { exam: g.exam_id }) && (
+              <>
+                <textarea className="input min-h-14 mb-2" placeholder="الرد على الطالب (بيظهر ليه)" value={resp[g.id] ?? g.response} onChange={(e) => setResp({ ...resp, [g.id]: e.target.value })} />
+                <div className="flex flex-wrap gap-2">
+                  <button onClick={() => open(g)} className="px-3 py-1.5 rounded-md border border-border hover:border-[var(--gold)] text-sm inline-flex items-center gap-2"><FileText className="h-4 w-4" />افتح التسليم</button>
+                  <button onClick={() => resolve(g.id, "accepted")} className="px-3 py-1.5 rounded-md bg-emerald-600 text-white text-sm">قبول</button>
+                  <button onClick={() => resolve(g.id, "rejected")} className="px-3 py-1.5 rounded-md bg-destructive text-white text-sm">رفض</button>
+                  {g.status !== "open" && <button onClick={() => resolve(g.id, "open")} className="px-3 py-1.5 rounded-md border border-border text-sm">إعادة فتح</button>}
+                </div>
+                <div className="text-[11px] text-muted-foreground mt-2">لو قبلت التظلم عدّل الدرجة من «افتح التسليم» — التعديل بيتنقل لنسخة الأرشيف تلقائي.</div>
+              </>
+            )}
+          </div>
+        ))}
+      </div>
+      {view && <AttemptModal id={view.id} archive={view.archive} canGrade={can("exams.review.grade", { exam: view.exam })} onClose={() => { setView(null); qc.invalidateQueries({ queryKey: ["admin-archive"] }); qc.invalidateQueries({ queryKey: ["admin-attempts"] }); }} />}
     </div>
   );
 }

@@ -1,9 +1,10 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { motion } from "framer-motion";
-import { AlertTriangle, ArrowRight, Award, CheckCircle2, ChevronDown, Hourglass, MinusCircle, XCircle } from "lucide-react";
-import { myExamResultsFn } from "@/lib/exam-fns";
+import { AlertTriangle, ArrowRight, Award, CheckCircle2, ChevronDown, Flag, Hourglass, MinusCircle, XCircle } from "lucide-react";
+import { createGrievanceFn, myExamResultsFn } from "@/lib/exam-fns";
 import { formatAnswer } from "@/lib/answer-format";
 import { useMe } from "@/lib/use-me";
 import type { MyResult } from "@/lib/exams.server";
@@ -63,7 +64,7 @@ function ResultCard({ r }: { r: MyResult }) {
       <button className="w-full flex items-center gap-4 text-right" onClick={() => r.graded && setOpen((v) => !v)} disabled={!r.graded}>
         <div className="flex-1 min-w-0">
           <div className="font-bold text-lg">{r.exam_title}</div>
-          <div className="text-xs text-muted-foreground mt-1">المحاولة {r.attempt_no} · سُلّمت {fmtDate(r.submitted_at)}</div>
+          <div className="text-xs text-muted-foreground mt-1">المحاولة {r.attempt_no} · سُلّمت {fmtDate(r.submitted_at)}{r.archived && <span className="mr-2 rounded-full border border-sky-400/50 text-sky-400 px-2 py-0.5">مؤرشف</span>}{r.grievances.some((g) => g.status === "open") && <span className="mr-2 rounded-full bg-amber-500 text-black px-2 py-0.5 font-bold">تظلم قيد المراجعة</span>}</div>
         </div>
         {r.graded ? (
           <div className="text-left shrink-0">
@@ -79,9 +80,10 @@ function ResultCard({ r }: { r: MyResult }) {
       {open && (
         <div className="mt-5 border-t border-border pt-5">
           <Summary r={r} />
-          {r.view === "new" ? <NewReview items={r.items} /> : (
+          <GeneralGrievance r={r} />
+          {r.view === "new" ? <NewReview r={r} items={r.items} /> : (
           <div className="space-y-3">
-          {r.items.map((it, i) => <ItemBox key={it.id} it={it} i={i} />)}
+          {r.items.map((it, i) => <ItemBox key={it.id} it={it} i={i} r={r} />)}
           </div>
           )}
         </div>
@@ -136,7 +138,7 @@ function Summary({ r }: { r: MyResult }) {
 }
 
 /** مراجعة بالشكل الجديد: شريط أرقام ملوّن بالنتيجة + سؤال واحد */
-function NewReview({ items }: { items: MyResult["items"] }) {
+function NewReview({ items, r }: { items: MyResult["items"]; r: MyResult }) {
   const [cur, setCur] = useState(0);
   const it = items[cur];
   if (!it) return null;
@@ -151,7 +153,7 @@ function NewReview({ items }: { items: MyResult["items"] }) {
         ))}
       </div>
       <div>
-        <ItemBox it={it} i={cur} />
+        <ItemBox it={it} i={cur} r={r} />
         <div className="mt-3 flex justify-between">
           <button type="button" disabled={cur === 0} onClick={() => setCur(cur - 1)} className="px-4 py-2 rounded-lg border border-border disabled:opacity-40">السابق</button>
           <button type="button" disabled={cur === items.length - 1} onClick={() => setCur(cur + 1)} className="px-4 py-2 rounded-lg border border-border disabled:opacity-40">التالي</button>
@@ -161,8 +163,9 @@ function NewReview({ items }: { items: MyResult["items"] }) {
   );
 }
 
-function ItemBox({ it, i }: { it: MyResult["items"][number]; i: number }) {
+function ItemBox({ it, i, r }: { it: MyResult["items"][number]; i: number; r: MyResult }) {
   return (
+    <div>
             <div className={`rounded-lg p-4 ${it.violation ? "border-2 border-destructive bg-destructive/5" : `border ${V[it.verdict].box}`}`}>
               {it.violation && (
                 <div className="mb-3 rounded-md bg-destructive/15 px-3 py-2 text-sm font-bold text-destructive flex items-center gap-2">
@@ -192,5 +195,60 @@ function ItemBox({ it, i }: { it: MyResult["items"][number]; i: number }) {
                 </div>
               )}
             </div>
+      <GrievanceBlock r={r} qid={it.id} />
+    </div>
   );
+}
+
+const G_STATUS = { open: { label: "قيد المراجعة", cls: "bg-amber-500 text-black" }, accepted: { label: "تم قبول التظلم", cls: "bg-emerald-500/20 text-emerald-500" }, rejected: { label: "تم رفض التظلم", cls: "bg-destructive/20 text-destructive" } } as const;
+
+/** تظلماتك على سؤال معيّن + زرار تظلم جديد */
+function GrievanceBlock({ r, qid }: { r: MyResult; qid: string | null }) {
+  const mine = r.grievances.filter((g) => g.qid === qid);
+  const hasOpen = mine.some((g) => g.status === "open");
+  return (
+    <div className="mt-2">
+      {mine.map((g) => (
+        <div key={g.id} className="mb-2 rounded-md border border-amber-500/40 bg-amber-500/5 p-3 text-sm">
+          <div className="flex items-center gap-2 mb-1">
+            <Flag className="h-4 w-4 text-amber-500" /><b>تظلمك</b>
+            <span className={`mr-auto text-xs px-2 py-0.5 rounded-full ${G_STATUS[g.status].cls}`}>{G_STATUS[g.status].label}</span>
+          </div>
+          <div className="whitespace-pre-wrap">{g.message}</div>
+          {g.response && <div className="mt-2 rounded bg-white/5 p-2 whitespace-pre-wrap"><span className="text-xs text-[var(--gold)] font-bold">رد الإدارة: </span>{g.response}</div>}
+        </div>
+      ))}
+      {!hasOpen && <GrievanceForm attemptId={r.attempt_id} qid={qid} />}
+    </div>
+  );
+}
+
+function GrievanceForm({ attemptId, qid }: { attemptId: string; qid: string | null }) {
+  const qc = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const [msg, setMsg] = useState("");
+  const [busy, setBusy] = useState(false);
+  const send = async () => {
+    setBusy(true);
+    try {
+      await createGrievanceFn({ data: { attempt_id: attemptId, qid, message: msg } });
+      toast.success("تم إرسال التظلم للإدارة");
+      setMsg(""); setOpen(false);
+      qc.invalidateQueries({ queryKey: ["my-exam-results"] });
+    } catch (e: any) { toast.error(e.message || "حدث خطأ"); } finally { setBusy(false); }
+  };
+  if (!open) return <button type="button" onClick={() => setOpen(true)} className="text-xs text-muted-foreground hover:text-amber-500 inline-flex items-center gap-1"><Flag className="h-3.5 w-3.5" />{qid ? "تظلم على هذا السؤال" : "تظلم عام على التسليم"}</button>;
+  return (
+    <div className="rounded-md border border-border p-3">
+      <textarea className="input min-h-20 mb-2" maxLength={1500} placeholder="اشرح الغلط اللي شايفه في التصحيح..." value={msg} onChange={(e) => setMsg(e.target.value)} />
+      <div className="flex gap-2">
+        <button type="button" onClick={send} disabled={busy || msg.trim().length < 3} className="btn-gold ripple !py-1.5 !px-4 text-sm disabled:opacity-50">{busy ? "جارٍ الإرسال..." : "إرسال التظلم"}</button>
+        <button type="button" onClick={() => setOpen(false)} className="px-3 py-1.5 rounded-md border border-border text-sm">إلغاء</button>
+      </div>
+    </div>
+  );
+}
+
+function GeneralGrievance({ r }: { r: MyResult }) {
+  return <div className="mb-4"><GrievanceBlock r={r} qid={null} /></div>;
 }

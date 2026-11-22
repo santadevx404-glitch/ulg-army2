@@ -9,6 +9,7 @@ import { sanitizeKeys } from "./permissions";
 
 const USERS_KEY = "bwd:users";
 const SECRET_KEY = "bwd:session-secret";
+const OWNER_ID_KEY = "bwd:owner-id"; // لو اتنقلت الملكية: id الحساب المالك الحالي (من غيره المالك = OWNER_EMAIL)
 
 export const OWNER_EMAIL = "santadevx404@gmail.com";
 
@@ -73,13 +74,17 @@ export function normalizeUser(u: Partial<User>): User {
   };
 }
 
-export function isOwner(u: Pick<User, "email">): boolean {
-  return u.email === OWNER_EMAIL;
+// المالك الحالي: بيتحمّل مع كل قراءة للمستخدمين (فكل طلب بيشوف القيمة الحديثة)
+let currentOwnerId: string | null = null;
+
+export function isOwner(u: Pick<User, "id" | "email">): boolean {
+  return currentOwnerId ? u.id === currentOwnerId : u.email === OWNER_EMAIL;
 }
 
 const withLock = makeLock();
 
 async function readUsers(): Promise<User[]> {
+  currentOwnerId = await kvGetJSON<string | null>(OWNER_ID_KEY, null);
   const raw = await kvGetJSON<Partial<User>[]>(USERS_KEY, []);
   return raw.map(normalizeUser);
 }
@@ -296,6 +301,11 @@ export async function changeOwnPassword(id: string, oldPassword: string, newPass
   });
 }
 
+export async function checkPassword(id: string, password: string): Promise<boolean> {
+  const u = (await readUsers()).find((x) => x.id === id);
+  return !!u && verifyPassword(password, u.passwordHash);
+}
+
 export const SESSION_COOKIE = "bwd_session";
 export const SESSION_MAX_AGE = 60 * 60 * 24 * 30; // 30 يوم بالثواني
 
@@ -498,6 +508,25 @@ export async function setUserHidden(id: string, hidden: boolean): Promise<void> 
     notOwner(u);
     u.hidden = hidden;
     await writeUsers(users);
+  });
+}
+
+/** نقل الملكية للحساب toId. المالك الحالي بس (الفحص + كلمة السر في الطبقة اللي فوق). */
+export async function transferOwnership(fromId: string, toId: string): Promise<{ error?: string }> {
+  return withLock(async () => {
+    const users = await readUsers();
+    const from = mustFind(users, fromId);
+    const to = mustFind(users, toId);
+    if (!isOwner(from)) return { error: "مش انت صاحب الموقع" };
+    if (from.id === to.id) return { error: "اختار حساب تاني" };
+    if (to.status !== "active") return { error: "الحساب لازم يكون مفعّل" };
+    from.display_title = null;
+    to.display_title = null;
+    to.hidden = false;
+    await writeUsers(users);
+    await kvSetJSON(OWNER_ID_KEY, to.id);
+    currentOwnerId = to.id;
+    return {};
   });
 }
 

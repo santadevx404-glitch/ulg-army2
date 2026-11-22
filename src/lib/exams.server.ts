@@ -15,6 +15,8 @@ import { MAX_IMAGE_BYTES, deleteExamImages, detectImageExt, saveExamImage } from
 
 const EXAMS_KEY = "bwd:exams";
 const ATTEMPTS_KEY = "bwd:exam-attempts";
+const ARCHIVE_KEY = "bwd:exam-archive";
+const GRIEVANCES_KEY = "bwd:exam-grievances";
 
 // سماحية بسيطة (ثواني) لآخر حفظ بيوصل مع انتهاء الوقت بسبب بطء الشبكة
 const SUBMIT_GRACE_MS = 15_000;
@@ -985,45 +987,52 @@ function isReleased(att: Attempt, g: AttemptGrade): boolean {
   return !!att.graded_at || g.complete;
 }
 
-/** حفظ تصحيح محاولة: درجة لكل سؤال (0 → الحد الأقصى للسؤال). الأسئلة اللي مفيهاش درجة بتتحسب 0. */
+/** تطبيق تصحيح على محاولة (بيعدّل الـ att نفسه) — مشترك بين التسليمات الحية والأرشيف. */
+function applyGrade(att: Attempt, exam: Exam | undefined, live: Map<string, Question>, scores: Record<string, unknown>, feedback: Record<string, unknown>, gradedBy: string): { total: number; max: number } {
+  if (att.status !== "submitted" && att.status !== "retired") throw new Error("المحاولة لسه ماتسلّمتش");
+  const next: Record<string, number> = { ...att.scores };
+  for (const sq of att.questions) {
+    const raw = scores[sq.id];
+    if (raw === undefined || raw === null || raw === "") continue;
+    const n = Number(raw);
+    if (!Number.isFinite(n)) throw new Error("درجة غير صحيحة");
+    if (n < 0 || n > sq.points) throw new Error(`الدرجة لازم تكون بين 0 و ${sq.points}`);
+    next[sq.id] = round2(n);
+  }
+  att.scores = next;
+  // أي سؤال لسه من غير درجة (نصي لم يتصحح) بيتحسب صفر عند الحفظ
+  const after = gradeAttempt(att, exam, live);
+  for (const it of after.items) if (it.score === null) att.scores[it.id] = 0;
+  // أي سؤال درجته أقل من الكاملة (ومش متصحح تلقائي) لازم له الإجابة الصح مكتوبة
+  const fb: Record<string, string> = {};
+  const final0 = gradeAttempt(att, exam, live);
+  for (const [i, it] of final0.items.entries()) {
+    const text = String(feedback?.[it.id] ?? "").trim().slice(0, 5000);
+    if ((it.score ?? 0) < it.max && !it.auto) {
+      if (!text) throw new Error(`اكتب الإجابة الصح للسؤال ${i + 1} (درجته أقل من الكاملة)`);
+    }
+    if (text && (it.score ?? 0) < it.max) fb[it.id] = text;
+  }
+  att.feedback = fb;
+  att.graded_at = new Date().toISOString();
+  att.graded_by = gradedBy;
+  const final = gradeAttempt(att, exam, live);
+  return { total: final.total, max: final.max };
+}
+
+/** حفظ تصحيح محاولة: درجة لكل سؤال (0 → الحد الأقصى للسؤال). الأسئلة اللي مفيهاش درجة بتتحسب 0. لو ليها أرشيف بيتحدّث معاها. */
 export async function adminGradeAttempt(id: string, scores: Record<string, unknown>, feedback: Record<string, unknown>, gradedBy: string): Promise<{ total: number; max: number }> {
   return withLock(async () => {
     const attemptsDb = await readAttemptsDb();
     const att = attemptsDb.attempts.find((a) => a.id === id);
     if (!att) throw new Error("المحاولة غير موجودة");
-    if (att.status !== "submitted" && att.status !== "retired") throw new Error("المحاولة لسه ماتسلّمتش");
     const exams = await readExamsDb();
     const exam = exams.exams.find((e) => e.id === att.exam_id);
     const live = new Map(exams.questions.map((q) => [q.id, q]));
-    const next: Record<string, number> = { ...att.scores };
-    for (const sq of att.questions) {
-      const raw = scores[sq.id];
-      if (raw === undefined || raw === null || raw === "") continue;
-      const n = Number(raw);
-      if (!Number.isFinite(n)) throw new Error("درجة غير صحيحة");
-      if (n < 0 || n > sq.points) throw new Error(`الدرجة لازم تكون بين 0 و ${sq.points}`);
-      next[sq.id] = round2(n);
-    }
-    att.scores = next;
-    // أي سؤال لسه من غير درجة (نصي لم يتصحح) بيتحسب صفر عند الحفظ
-    const after = gradeAttempt(att, exam, live);
-    for (const it of after.items) if (it.score === null) att.scores[it.id] = 0;
-    // أي سؤال درجته أقل من الكاملة (ومش متصحح تلقائي) لازم له الإجابة الصح مكتوبة
-    const fb: Record<string, string> = {};
-    const final0 = gradeAttempt(att, exam, live);
-    for (const [i, it] of final0.items.entries()) {
-      const text = String(feedback?.[it.id] ?? "").trim().slice(0, 5000);
-      if ((it.score ?? 0) < it.max && !it.auto) {
-        if (!text) throw new Error(`اكتب الإجابة الصح للسؤال ${i + 1} (درجته أقل من الكاملة)`);
-      }
-      if (text && (it.score ?? 0) < it.max) fb[it.id] = text;
-    }
-    att.feedback = fb;
-    att.graded_at = new Date().toISOString();
-    att.graded_by = gradedBy;
+    const res = applyGrade(att, exam, live, scores, feedback, gradedBy);
     await writeAttemptsDb(attemptsDb);
-    const final = gradeAttempt(att, exam, live);
-    return { total: final.total, max: final.max };
+    await syncArchiveEntry(att, exam, exams.questions);
+    return res;
   });
 }
 
@@ -1054,52 +1063,71 @@ export type MyResult = {
   attempt_no: number;
   submitted_at: string | null;
   graded: boolean;
+  archived: boolean; // ليها نسخة في الأرشيف (بتفضل متاحة حتى لو اتمسحت من التسليمات)
+  grievances: MyGrievance[];
   total: number | null;
   max: number;
   items: MyResultItem[]; // فاضية لو لسه ماتصححش
 };
+export type MyGrievance = { id: string; qid: string | null; q_text: string; message: string; status: GrievanceStatus; response: string; created_at: string; resolved_at: string | null };
 
-/** نتائج اختبارات المستخدم نفسه — الدرجات والصح/الغلط بتظهر بعد التصحيح بس. */
+function buildMyResult(a: Attempt, exam: Exam | undefined, live: Map<string, Question>, examTitle: string, archived: boolean): MyResult {
+  const g = gradeAttempt(a, exam, live);
+  const released = isReleased(a, g);
+  return {
+    attempt_id: a.id,
+    exam_id: a.exam_id,
+    exam_title: exam?.title ?? examTitle,
+    view: exam?.exam_view ?? "classic",
+    attempt_no: a.attempt_no,
+    submitted_at: a.submitted_at,
+    graded: released,
+    archived,
+    grievances: [],
+    total: released ? g.total : null,
+    max: g.max,
+    items: released
+      ? a.questions.map((sq, i) => {
+          const score = g.items[i].score ?? 0;
+          return {
+            id: sq.id,
+            type: sq.type,
+            text: sq.text,
+            options: sq.options,
+            answer: a.answers[sq.id] ?? "",
+            max: sq.points,
+            score,
+            verdict: verdictOf(score, sq.points),
+            violation: a.zeroed.includes(sq.id) ? "zeroed" : a.notices.some((n) => n.kind === "swap" && n.new_qid === sq.id) ? "replaced" : null,
+            feedback: a.zeroed.includes(sq.id) ? "اتصفّر السؤال ده تلقائيًا بسبب مخالفة تبديل التبويب أثناء الاختبار." : score >= sq.points ? null : a.feedback[sq.id] || (g.items[i].auto ? autoFeedback(sq.type, live.get(sq.id)) : null),
+          } satisfies MyResultItem;
+        })
+      : [],
+  };
+}
+
+/** نتائج اختبارات المستخدم نفسه — الدرجات والصح/الغلط بتظهر بعد التصحيح بس. بتشمل المؤرشف (حتى لو اتمسح من التسليمات). */
 export async function myResults(userId: string): Promise<MyResult[]> {
   const exams = await readExamsDb();
   const attemptsDb = await readAttemptsDb();
+  const archive = await readArchive();
+  const grievances = (await readGrievances()).filter((x) => x.user_id === userId);
   const live = new Map(exams.questions.map((q) => [q.id, q]));
   const out: MyResult[] = [];
+  const seen = new Set<string>();
   for (const a of attemptsDb.attempts) {
     if (a.user_id !== userId) continue;
     if (a.status !== "submitted" && a.status !== "retired") continue;
+    seen.add(a.id);
     const exam = exams.exams.find((e) => e.id === a.exam_id);
-    const g = gradeAttempt(a, exam, live);
-    const released = isReleased(a, g);
-    out.push({
-      attempt_id: a.id,
-      exam_id: a.exam_id,
-      exam_title: exam?.title ?? "(اختبار محذوف)",
-      view: exam?.exam_view ?? "classic",
-      attempt_no: a.attempt_no,
-      submitted_at: a.submitted_at,
-      graded: released,
-      total: released ? g.total : null,
-      max: g.max,
-      items: released
-        ? a.questions.map((sq, i) => {
-            const score = g.items[i].score ?? 0;
-            return {
-              id: sq.id,
-              type: sq.type,
-              text: sq.text,
-              options: sq.options,
-              answer: a.answers[sq.id] ?? "",
-              max: sq.points,
-              score,
-              verdict: verdictOf(score, sq.points),
-              violation: a.zeroed.includes(sq.id) ? "zeroed" : a.notices.some((n) => n.kind === "swap" && n.new_qid === sq.id) ? "replaced" : null,
-              feedback: a.zeroed.includes(sq.id) ? "اتصفّر السؤال ده تلقائيًا بسبب مخالفة تبديل التبويب أثناء الاختبار." : score >= sq.points ? null : a.feedback[sq.id] || (g.items[i].auto ? autoFeedback(sq.type, live.get(sq.id)) : null),
-            } satisfies MyResultItem;
-          })
-        : [],
-    });
+    out.push(buildMyResult(a, exam, live, "(اختبار محذوف)", archive.some((x) => x.id === a.id)));
   }
+  for (const e of archive) {
+    if (seen.has(e.id) || e.attempt.user_id !== userId) continue;
+    const snap = new Map(Object.entries(e.live));
+    out.push(buildMyResult(e.attempt, e.exam ?? undefined, snap, e.exam_title, true));
+  }
+  for (const r of out) r.grievances = grievances.filter((x) => x.attempt_id === r.attempt_id).map(({ id, qid, q_text, message, status, response, created_at, resolved_at }) => ({ id, qid, q_text, message, status, response, created_at, resolved_at }));
   return out.sort((x, y) => (y.submitted_at ?? "").localeCompare(x.submitted_at ?? ""));
 }
 
@@ -1201,11 +1229,15 @@ export async function adminSaveExam(input: Partial<Exam>): Promise<Exam> {
 export async function adminDeleteExam(id: string): Promise<void> {
   await withLock(async () => {
     const db = await readExamsDb();
+    const removedExam = db.exams.find((e) => e.id === id);
+    const removedQuestions = db.questions.filter((q) => q.exam_id === id);
     db.exams = db.exams.filter((e) => e.id !== id);
     db.questions = db.questions.filter((q) => q.exam_id !== id);
     await writeExamsDb(db);
     const att = await readAttemptsDb();
-    await deleteExamImages(att.attempts.filter((a) => a.exam_id === id).flatMap((a) => Object.values(a.images).flat()));
+    const doomed = att.attempts.filter((a) => a.exam_id === id);
+    const kept = await archiveBeforeDelete(doomed, { exams: removedExam ? [removedExam] : [], questions: removedQuestions }, "auto_exam_delete");
+    await deleteExamImages(doomed.filter((a) => !kept.has(a.id)).flatMap((a) => Object.values(a.images).flat()));
     att.attempts = att.attempts.filter((a) => a.exam_id !== id);
     await writeAttemptsDb(att);
   });
@@ -1367,6 +1399,8 @@ export type AdminAttemptRow = {
   user_id: string | null;
   violations: number;
   zeroed: number;
+  archived: boolean;
+  grievances_open: number;
 };
 
 export async function adminListAttempts(): Promise<AdminAttemptRow[]> {
@@ -1381,8 +1415,13 @@ export async function adminListAttempts(): Promise<AdminAttemptRow[]> {
     if (dirty) await writeAttemptsDb(attemptsDb);
     const titles = new Map(exams.exams.map((e) => [e.id, e.title]));
     const qLive = new Map(exams.questions.map((q) => [q.id, q]));
+    const archivedIds = new Set((await readArchive()).map((x) => x.id));
+    const openG = new Map<string, number>();
+    for (const x of await readGrievances()) if (x.status === "open") openG.set(x.attempt_id, (openG.get(x.attempt_id) ?? 0) + 1);
     return attemptsDb.attempts
       .map((a) => ({
+        archived: archivedIds.has(a.id),
+        grievances_open: openG.get(a.id) ?? 0,
         id: a.id,
         exam_id: a.exam_id,
         exam_title: titles.get(a.exam_id) ?? "(اختبار محذوف)",
@@ -1436,6 +1475,8 @@ export type AdminAttemptDetail = {
   max: number;
   graded: boolean;
   grading: GradingMode;
+  archived: boolean;
+  grievances: Grievance[];
 };
 
 export async function adminGetAttempt(id: string): Promise<AdminAttemptDetail | null> {
@@ -1444,12 +1485,20 @@ export async function adminGetAttempt(id: string): Promise<AdminAttemptDetail | 
   const att = attemptsDb.attempts.find((a) => a.id === id);
   if (!att) return null;
   const qMap = new Map(exams.questions.map((q) => [q.id, q]));
+  const detail = buildAdminDetail(att, exams.exams.find((e) => e.id === att.exam_id), qMap, "(اختبار محذوف)");
+  detail.archived = (await readArchive()).some((x) => x.id === id);
+  detail.grievances = (await readGrievances()).filter((x) => x.attempt_id === id);
+  return detail;
+}
+
+function buildAdminDetail(att: Attempt, exam: Exam | undefined, qMap: Map<string, Question>, examTitle: string): AdminAttemptDetail {
   const { token: _t, ...rest } = att;
-  const exam = exams.exams.find((e) => e.id === att.exam_id);
   const g = gradeAttempt(att, exam, qMap);
   return {
+    archived: false,
+    grievances: [],
     attempt: rest,
-    exam_title: exam?.title ?? "(اختبار محذوف)",
+    exam_title: exam?.title ?? examTitle,
     total: g.total,
     max: g.max,
     graded: isReleased(att, g),
@@ -1509,7 +1558,11 @@ export async function adminAllowRetake(ids: string[]): Promise<{ count: number }
         count++;
       }
     }
-    if (count) await writeAttemptsDb(attemptsDb);
+    if (count) {
+      await writeAttemptsDb(attemptsDb);
+      const ex = await readExamsDb();
+      for (const a of attemptsDb.attempts) if (set.has(a.id)) await syncArchiveEntry(a, ex.exams.find((e) => e.id === a.exam_id), ex.questions);
+    }
     return { count };
   });
 }
@@ -1518,8 +1571,315 @@ export async function adminDeleteAttempts(ids: string[]): Promise<void> {
   await withLock(async () => {
     const attemptsDb = await readAttemptsDb();
     const set = new Set(ids);
-    await deleteExamImages(attemptsDb.attempts.filter((a) => set.has(a.id)).flatMap((a) => Object.values(a.images).flat()));
+    const doomed = attemptsDb.attempts.filter((a) => set.has(a.id));
+    const ex = await readExamsDb();
+    const kept = await archiveBeforeDelete(doomed, ex, "auto_delete"); // المسلَّم بيتأرشف تلقائي
+    await deleteExamImages(doomed.filter((a) => !kept.has(a.id)).flatMap((a) => Object.values(a.images).flat()));
     attemptsDb.attempts = attemptsDb.attempts.filter((a) => !set.has(a.id));
     await writeAttemptsDb(attemptsDb);
   });
+}
+
+// ============================== الأرشيف ==============================
+// نسخة كاملة من التسليم (مع لقطة من الأسئلة والاختبار) بتفضل محفوظة حتى لو التسليم أو الاختبار اتمسح.
+// الطالب بيشوف أخطاءه منها، ومحدش يقدر يمسحها غير صاحب الموقع.
+
+export type ArchiveSource = "manual" | "auto_delete" | "auto_exam_delete";
+export type ArchiveEntry = {
+  id: string; // = id المحاولة
+  archived_at: string;
+  updated_at: string;
+  source: ArchiveSource;
+  exam_title: string;
+  exam: Exam | null; // لقطة من إعدادات الاختبار (نظام التصحيح وشكل العرض)
+  live: Record<string, Question>; // لقطة من الأسئلة (الإجابات الصح)
+  attempt: Attempt;
+};
+
+async function readArchive(): Promise<ArchiveEntry[]> {
+  return (await kvGetJSON<ArchiveEntry[]>(ARCHIVE_KEY, [])).map((e) => ({ ...e, live: e.live ?? {}, attempt: { ...e.attempt, images: e.attempt.images ?? {}, scores: e.attempt.scores ?? {}, feedback: e.attempt.feedback ?? {}, notices: e.attempt.notices ?? [], zeroed: e.attempt.zeroed ?? [], violation_ids: e.attempt.violation_ids ?? [] } }));
+}
+async function writeArchive(list: ArchiveEntry[]) {
+  await kvSetJSON(ARCHIVE_KEY, list);
+}
+
+function snapshotLive(att: Attempt, questions: Question[], old: Record<string, Question> = {}): Record<string, Question> {
+  const byId = new Map(questions.map((q) => [q.id, q]));
+  const out: Record<string, Question> = {};
+  for (const sq of att.questions) {
+    const q = byId.get(sq.id) ?? old[sq.id];
+    if (q) out[sq.id] = q;
+  }
+  return out;
+}
+
+/** عمل/تحديث نسخة أرشيف لمحاولة. (لازم يتنادى جوه withLock) */
+async function upsertArchive(att: Attempt, exam: Exam | undefined, questions: Question[], source: ArchiveSource): Promise<void> {
+  if (att.status !== "submitted" && att.status !== "retired") return;
+  const list = await readArchive();
+  const i = list.findIndex((e) => e.id === att.id);
+  const now = new Date().toISOString();
+  const old = i >= 0 ? list[i] : null;
+  const entry: ArchiveEntry = {
+    id: att.id,
+    archived_at: old?.archived_at ?? now,
+    updated_at: now,
+    source: old?.source ?? source,
+    exam_title: exam?.title ?? old?.exam_title ?? "(اختبار محذوف)",
+    exam: exam ?? old?.exam ?? null,
+    live: snapshotLive(att, questions, old?.live),
+    attempt: JSON.parse(JSON.stringify(att)) as Attempt,
+  };
+  if (i >= 0) list[i] = entry;
+  else list.push(entry);
+  await writeArchive(list);
+}
+
+/** لو للمحاولة أرشيف، بنحدّثه معاها (تصحيح/تعديل). (جوه withLock) */
+async function syncArchiveEntry(att: Attempt, exam: Exam | undefined, questions: Question[]): Promise<void> {
+  const list = await readArchive();
+  if (!list.some((e) => e.id === att.id)) return;
+  await upsertArchive(att, exam, questions, "manual");
+}
+
+/** قبل مسح تسليمات: بيأرشف المسلَّم منها. بيرجّع ids اللي اتأرشفت (صورها مبتتمسحش). (جوه withLock) */
+async function archiveBeforeDelete(doomed: Attempt[], ex: ExamsDB, source: ArchiveSource): Promise<Set<string>> {
+  const kept = new Set<string>();
+  const list = await readArchive();
+  const had = new Set(list.map((e) => e.id));
+  for (const a of doomed) {
+    if (a.status !== "submitted" && a.status !== "retired") continue;
+    await upsertArchive(a, ex.exams.find((e) => e.id === a.exam_id), ex.questions, source);
+    kept.add(a.id);
+  }
+  for (const id of had) kept.add(id);
+  return kept;
+}
+
+export async function adminArchiveAttempts(ids: string[]): Promise<{ count: number }> {
+  return withLock(async () => {
+    const attemptsDb = await readAttemptsDb();
+    const ex = await readExamsDb();
+    const set = new Set(ids);
+    let count = 0;
+    for (const a of attemptsDb.attempts) {
+      if (!set.has(a.id) || (a.status !== "submitted" && a.status !== "retired")) continue;
+      await upsertArchive(a, ex.exams.find((e) => e.id === a.exam_id), ex.questions, "manual");
+      count++;
+    }
+    return { count };
+  });
+}
+
+export type ArchiveRow = {
+  id: string;
+  exam_id: string;
+  exam_title: string;
+  identity: string;
+  fields: Record<string, string>;
+  user_id: string | null;
+  attempt_no: number;
+  submitted_at: string | null;
+  archived_at: string;
+  updated_at: string;
+  source: ArchiveSource;
+  in_submissions: boolean; // لسه موجود في التسليمات
+  score: number | null;
+  max: number;
+  graded: boolean;
+  grievances_open: number;
+  grievances_total: number;
+};
+
+export async function adminListArchive(): Promise<ArchiveRow[]> {
+  const list = await readArchive();
+  const live = new Set((await readAttemptsDb()).attempts.map((a) => a.id));
+  const gr = await readGrievances();
+  return list
+    .map((e) => {
+      const g = gradeAttempt(e.attempt, e.exam ?? undefined, new Map(Object.entries(e.live)));
+      const mine = gr.filter((x) => x.attempt_id === e.id);
+      return {
+        id: e.id,
+        exam_id: e.attempt.exam_id,
+        exam_title: e.exam_title,
+        identity: e.attempt.identity,
+        fields: e.attempt.fields,
+        user_id: e.attempt.user_id,
+        attempt_no: e.attempt.attempt_no,
+        submitted_at: e.attempt.submitted_at,
+        archived_at: e.archived_at,
+        updated_at: e.updated_at,
+        source: e.source,
+        in_submissions: live.has(e.id),
+        score: g.complete || e.attempt.graded_at ? g.total : null,
+        max: g.max,
+        graded: isReleased(e.attempt, g),
+        grievances_open: mine.filter((x) => x.status === "open").length,
+        grievances_total: mine.length,
+      } satisfies ArchiveRow;
+    })
+    .sort((a, b) => b.archived_at.localeCompare(a.archived_at));
+}
+
+export async function adminGetArchive(id: string): Promise<AdminAttemptDetail | null> {
+  const e = (await readArchive()).find((x) => x.id === id);
+  if (!e) return null;
+  const detail = buildAdminDetail(e.attempt, e.exam ?? undefined, new Map(Object.entries(e.live)), e.exam_title);
+  detail.archived = true;
+  detail.grievances = (await readGrievances()).filter((x) => x.attempt_id === id);
+  return detail;
+}
+
+/** تصحيح نسخة الأرشيف: لو التسليم لسه موجود بيتصحح هو والأرشيف بيتحدّث، وإلا بيتعدّل الأرشيف نفسه. */
+export async function adminGradeArchive(id: string, scores: Record<string, unknown>, feedback: Record<string, unknown>, gradedBy: string): Promise<{ total: number; max: number }> {
+  const liveExists = (await readAttemptsDb()).attempts.some((a) => a.id === id);
+  if (liveExists) return adminGradeAttempt(id, scores, feedback, gradedBy);
+  return withLock(async () => {
+    const list = await readArchive();
+    const e = list.find((x) => x.id === id);
+    if (!e) throw new Error("النسخة غير موجودة في الأرشيف");
+    const res = applyGrade(e.attempt, e.exam ?? undefined, new Map(Object.entries(e.live)), scores, feedback, gradedBy);
+    e.updated_at = new Date().toISOString();
+    await writeArchive(list);
+    return res;
+  });
+}
+
+/** استرجاع من الأرشيف للتسليمات (ولو regrade: بيتمسح التصحيح عشان يتصحح من جديد). النسخة بتفضل في الأرشيف. */
+export async function adminRestoreArchive(id: string, regrade: boolean): Promise<{ restored: boolean }> {
+  return withLock(async () => {
+    const list = await readArchive();
+    const e = list.find((x) => x.id === id);
+    if (!e) throw new Error("النسخة غير موجودة في الأرشيف");
+    const attemptsDb = await readAttemptsDb();
+    let att = attemptsDb.attempts.find((a) => a.id === id);
+    let restored = false;
+    if (!att) {
+      att = { ...JSON.parse(JSON.stringify(e.attempt)), token: crypto.randomBytes(24).toString("hex") } as Attempt;
+      att.status = "submitted";
+      attemptsDb.attempts.push(att);
+      restored = true;
+    }
+    if (regrade) {
+      att.scores = {};
+      att.feedback = {};
+      att.graded_at = null;
+      att.graded_by = null;
+    }
+    await writeAttemptsDb(attemptsDb);
+    const ex = await readExamsDb();
+    await upsertArchive(att, ex.exams.find((x) => x.id === att!.exam_id) ?? e.exam ?? undefined, ex.questions, "manual");
+    return { restored };
+  });
+}
+
+/** مسح نهائي من الأرشيف — صاحب الموقع بس (الفحص في طبقة الـ fn). */
+export async function ownerDeleteArchive(ids: string[]): Promise<{ count: number }> {
+  return withLock(async () => {
+    const list = await readArchive();
+    const set = new Set(ids);
+    const doomed = list.filter((e) => set.has(e.id));
+    const liveIds = new Set((await readAttemptsDb()).attempts.map((a) => a.id));
+    await deleteExamImages(doomed.filter((e) => !liveIds.has(e.id)).flatMap((e) => Object.values(e.attempt.images).flat()));
+    await writeArchive(list.filter((e) => !set.has(e.id)));
+    return { count: doomed.length };
+  });
+}
+
+// ============================== التظلمات ==============================
+
+export type GrievanceStatus = "open" | "accepted" | "rejected";
+export type Grievance = {
+  id: string;
+  attempt_id: string;
+  exam_id: string;
+  exam_title: string;
+  user_id: string;
+  identity: string;
+  qid: string | null; // السؤال المتظلَّم عليه (null = تظلم عام)
+  q_text: string;
+  message: string;
+  status: GrievanceStatus;
+  response: string;
+  created_at: string;
+  resolved_at: string | null;
+  resolved_by: string | null;
+};
+
+async function readGrievances(): Promise<Grievance[]> {
+  return kvGetJSON<Grievance[]>(GRIEVANCES_KEY, []);
+}
+async function writeGrievances(list: Grievance[]) {
+  await kvSetJSON(GRIEVANCES_KEY, list);
+}
+
+/** الطالب بيتظلم على سؤال (أو تظلم عام) في تسليم بتاعه — سواء لسه في التسليمات أو متأرشف. */
+export async function createGrievance(userId: string, attemptId: string, qid: string | null, message: string): Promise<Grievance> {
+  const msg = String(message ?? "").trim().slice(0, 1500);
+  if (msg.length < 3) throw new Error("اكتب سبب التظلم");
+  return withLock(async () => {
+    const attemptsDb = await readAttemptsDb();
+    const ex = await readExamsDb();
+    let att = attemptsDb.attempts.find((a) => a.id === attemptId);
+    let exam = att ? ex.exams.find((e) => e.id === att!.exam_id) : undefined;
+    let qMap = new Map(ex.questions.map((q) => [q.id, q]));
+    let title = exam?.title ?? "(اختبار محذوف)";
+    if (!att) {
+      const e = (await readArchive()).find((x) => x.id === attemptId);
+      if (e) {
+        att = e.attempt;
+        exam = e.exam ?? undefined;
+        qMap = new Map(Object.entries(e.live));
+        title = e.exam_title;
+      }
+    }
+    if (!att || att.user_id !== userId) throw new Error("التسليم غير موجود");
+    if (!isReleased(att, gradeAttempt(att, exam, qMap))) throw new Error("النتيجة لسه ماظهرتش");
+    let qText = "تظلم عام على التسليم";
+    if (qid) {
+      const sq = att.questions.find((q) => q.id === qid);
+      if (!sq) throw new Error("السؤال غير موجود في التسليم");
+      qText = sq.text;
+    }
+    const list = await readGrievances();
+    if (list.some((g) => g.attempt_id === attemptId && g.qid === (qid ?? null) && g.status === "open")) throw new Error("عندك تظلم مفتوح على نفس السؤال بالفعل");
+    if (list.filter((g) => g.attempt_id === attemptId && g.status === "open").length >= 30) throw new Error("وصلت للحد الأقصى من التظلمات المفتوحة");
+    const g: Grievance = {
+      id: crypto.randomUUID(), attempt_id: attemptId, exam_id: att.exam_id, exam_title: title, user_id: userId,
+      identity: att.identity, qid: qid ?? null, q_text: qText.slice(0, 400), message: msg, status: "open", response: "",
+      created_at: new Date().toISOString(), resolved_at: null, resolved_by: null,
+    };
+    list.push(g);
+    await writeGrievances(list);
+    return g;
+  });
+}
+
+export async function adminListGrievances(): Promise<Grievance[]> {
+  return (await readGrievances()).sort((a, b) => b.created_at.localeCompare(a.created_at));
+}
+
+export async function grievanceExamIds(ids: string[]): Promise<string[]> {
+  const set = new Set(ids);
+  return [...new Set((await readGrievances()).filter((g) => set.has(g.id)).map((g) => g.exam_id))];
+}
+
+export async function adminResolveGrievance(id: string, status: "open" | "accepted" | "rejected", response: string, by: string): Promise<Grievance> {
+  return withLock(async () => {
+    const list = await readGrievances();
+    const g = list.find((x) => x.id === id);
+    if (!g) throw new Error("التظلم غير موجود");
+    g.status = status;
+    g.response = String(response ?? "").trim().slice(0, 1500);
+    g.resolved_at = status === "open" ? null : new Date().toISOString();
+    g.resolved_by = status === "open" ? null : by;
+    await writeGrievances(list);
+    return g;
+  });
+}
+
+export async function archiveExamIds(ids: string[]): Promise<string[]> {
+  const set = new Set(ids);
+  return [...new Set((await readArchive()).filter((e) => set.has(e.id)).map((e) => e.attempt.exam_id))];
 }
