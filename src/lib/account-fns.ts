@@ -295,6 +295,22 @@ export const deleteMemberFn = createServerFn({ method: "POST" })
     return {};
   });
 
+/** صاحب الموقع يعدّل بيانات نفسه (اسم الحساب والشخصية والكود). */
+export const updateMyDetailsFn = createServerFn({ method: "POST" })
+  .validator((d: { account_name: string; character_name: string; military_code: string }) => d)
+  .handler(async ({ data }) => {
+    const actor = await requireActor();
+    ownerOnly(actor);
+    const t = actor.user;
+    await auth.updateUserDetails(t.id, data, { allowOwner: true });
+    await audit.logAdmin(actor, {
+      category: "accounts", action: "member.update", summary: "عدّل بيانات حسابه", target: data.account_name.trim(),
+      changes: ([["اسم الحساب", t.account_name, data.account_name], ["اسم الشخصية", t.character_name, data.character_name], ["الكود العسكري", t.military_code, data.military_code]] as [string, string, string][])
+        .filter(([, b, a]) => b !== a.trim()).map(([label, before, after]) => ({ label, before: before || null, after: after.trim() || null })),
+    });
+    return {};
+  });
+
 export const updateMemberDetailsFn = createServerFn({ method: "POST" })
   .validator((d: { id: string; account_name: string; character_name: string; military_code: string }) => d)
   .handler(async ({ data }) => {

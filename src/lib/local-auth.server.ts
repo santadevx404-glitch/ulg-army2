@@ -437,6 +437,7 @@ export async function deleteUser(id: string): Promise<void> {
 export async function updateUserDetails(
   id: string,
   d: { account_name: string; character_name: string; military_code: string },
+  opts: { allowOwner?: boolean } = {},
 ): Promise<void> {
   const clean = (v: unknown, max = 80) => String(v ?? "").trim().replace(/\s+/g, " ").slice(0, max);
   const account_name = clean(d.account_name);
@@ -446,7 +447,7 @@ export async function updateUserDetails(
   await withLock(async () => {
     const users = await readUsers();
     const u = mustFind(users, id);
-    notOwner(u);
+    if (!opts.allowOwner) notOwner(u);
     if (users.some((x) => x.id !== id && x.status !== "rejected" && x.account_name.toLowerCase() === account_name.toLowerCase())) {
       throw new Error("اسم الحساب ده مستخدم بالفعل");
     }

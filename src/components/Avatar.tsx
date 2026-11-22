@@ -1,12 +1,12 @@
 // صورة بروفايل (أو أول حرف من الاسم لو مفيش صورة).
 /** تاج مايل فوق صورة صاحب الموقع */
 function Crown({ size }: { size: number }) {
-  const w = Math.max(14, Math.round(size * 0.5));
+  const w = Math.max(12, Math.round(size * 0.34));
   return (
     <svg
       viewBox="0 0 24 24" width={w} height={w} aria-label="صاحب الموقع"
       className="absolute drop-shadow-[0_1px_2px_rgba(0,0,0,0.7)] pointer-events-none"
-      style={{ top: -w * 0.62, right: -w * 0.22, transform: "rotate(24deg)" }}
+      style={{ top: size * 0.146 - w * 0.35, right: size * 0.146 - w * 0.35, transform: "rotate(40deg)" }}
     >
       <path d="M3 8l4.5 4L12 5l4.5 7L21 8l-2 11H5L3 8z" fill="#f5c518" stroke="#8a6d00" strokeWidth="1.2" strokeLinejoin="round" />
       <circle cx="3" cy="8" r="1.6" fill="#f5c518" stroke="#8a6d00" strokeWidth="1" />
