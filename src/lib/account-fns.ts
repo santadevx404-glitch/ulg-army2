@@ -1,6 +1,6 @@
 // Server functions الخاصة بالحسابات والرتب والصلاحيات والسجل.
 import { createServerFn } from "@tanstack/react-start";
-import { getCookie } from "@tanstack/react-start/server";
+import { getCookie, setCookie } from "@tanstack/react-start/server";
 import * as auth from "./local-auth.server";
 import * as access from "./access.server";
 import * as audit from "./audit.server";
@@ -109,6 +109,29 @@ export const transferOwnershipFn = createServerFn({ method: "POST" })
       changes: [],
     });
     return {};
+  });
+
+/** تعطيل الموقع (صاحب الموقع بس). */
+export const siteLockStatusFn = createServerFn({ method: "GET" }).handler(async () => {
+  const actor = await requireActor();
+  ownerOnly(actor);
+  return (await import("./site-lock.server")).siteLockInfo();
+});
+
+export const setSiteLockFn = createServerFn({ method: "POST" })
+  .validator((d: { enabled: boolean; code?: string }) => d)
+  .handler(async ({ data }) => {
+    const actor = await requireActor();
+    ownerOnly(actor);
+    const lock = await import("./site-lock.server");
+    await lock.setSiteLock(!!data.enabled, data.code);
+    // صاحب الموقع يفضل داخل: بنديه كوكي المطوّر على متصفحه
+    if (data.enabled) setCookie(lock.DEV_COOKIE, await lock.makeDevToken(), { httpOnly: true, sameSite: "lax", path: "/", maxAge: lock.DEV_COOKIE_MAX_AGE });
+    await audit.logAdmin(actor, {
+      category: "settings", action: "site.lock", changes: [],
+      summary: data.enabled ? "عطّل الموقع" : data.code?.trim() ? "غيّر كود المطوّر" : "فعّل الموقع من تاني",
+    });
+    return lock.siteLockInfo();
   });
 
 // ==================== طلبات الحسابات ====================

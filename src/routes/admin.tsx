@@ -15,6 +15,7 @@ import {
   saveTopicFn,
   deleteTopicFn,
 } from "@/lib/server-fns";
+import { SiteLockAdmin } from "@/components/SiteLockAdmin";
 import { ExamsAdmin, SubmissionsAdmin, ArchiveAdmin, GrievancesAdmin, useOpenGrievancesCount, BlockedAdmin, useBlockedCount } from "@/components/ExamsAdmin";
 import { RequestsAdmin, MembersAdmin, RanksAdmin, LogAdmin, usePendingRequestsCount } from "@/components/AccountsAdmin";
 import { ChatsAdmin } from "@/components/ChatsAdmin";
@@ -83,6 +84,7 @@ function AdminPage() {
       {active === "items" && <ItemsAdmin />}
       {active === "exams" && <ExamsAdmin />}
       {active === "submissions" && <SubmissionsAdmin />}
+      {active === "sitelock" && <SiteLockAdmin />}
       {active === "archive" && <ArchiveAdmin />}
       {active === "grievances" && <GrievancesAdmin />}
       {active === "blocked" && <BlockedAdmin />}

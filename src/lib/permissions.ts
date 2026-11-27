@@ -430,13 +430,14 @@ export function covers(perms: PermInput, owner: boolean, key: string): boolean {
 
 // ============================== التابات ==============================
 
-export type TabId = "sections" | "items" | "exams" | "submissions" | "archive" | "grievances" | "blocked" | "chats" | "announcements" | "requests" | "members" | "ranks" | "log";
+export type TabId = "sections" | "items" | "exams" | "submissions" | "archive" | "grievances" | "blocked" | "chats" | "announcements" | "requests" | "sitelock" | "members" | "ranks" | "log";
 
 export const TAB_LABELS: Record<TabId, string> = {
   sections: "الأقسام",
   items: "العناصر",
   exams: "الاختبارات",
   submissions: "التسليمات",
+  sitelock: "تعطيل الموقع",
   archive: "أرشيف التسليمات",
   grievances: "التظلمات",
   blocked: "المحظورين",
@@ -448,7 +449,7 @@ export const TAB_LABELS: Record<TabId, string> = {
   log: "سجل الدخول",
 };
 
-export const TAB_ORDER: TabId[] = ["sections", "items", "exams", "submissions", "archive", "grievances", "blocked", "chats", "announcements", "requests", "members", "ranks", "log"];
+export const TAB_ORDER: TabId[] = ["sections", "items", "exams", "submissions", "archive", "grievances", "blocked", "chats", "announcements", "requests", "members", "ranks", "log", "sitelock"];
 
 export function canSeeTab(perms: PermInput, owner: boolean, tab: TabId): boolean {
   const any = (...l: string[]) => hasAnyOf(perms, owner, l);
@@ -457,6 +458,7 @@ export function canSeeTab(perms: PermInput, owner: boolean, tab: TabId): boolean
     case "items": return any("items");
     case "exams": return any("exams.create", "exams.delete", "exams.manage", "exams.open", "exams.close");
     case "submissions": return any("exams.review");
+    case "sitelock": return owner;
     case "archive": return any("exams.review.archive");
     case "grievances": return any("exams.review.grievances");
     case "blocked": return any("exams.unblock");
