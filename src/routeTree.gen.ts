@@ -19,6 +19,7 @@ import { Route as ApiAvatarRouteImport } from './routes/api.avatar'
 import { Route as ApiChatImageRouteImport } from './routes/api.chat-image'
 import { Route as ApiExamImageRouteImport } from './routes/api.exam-image'
 import { Route as ApiExamLeaveRouteImport } from './routes/api.exam-leave'
+import { Route as ApiSiteUnlockRouteImport } from './routes/api.site-unlock'
 import { Route as ApiStorageCheckRouteImport } from './routes/api.storage-check'
 import { Route as ChatIndexRouteImport } from './routes/chat.index'
 import { Route as ChatIdRouteImport } from './routes/chat.$id'
@@ -80,6 +81,11 @@ const ApiExamImageRoute = ApiExamImageRouteImport.update({
 const ApiExamLeaveRoute = ApiExamLeaveRouteImport.update({
   id: '/api/exam-leave',
   path: '/api/exam-leave',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiSiteUnlockRoute = ApiSiteUnlockRouteImport.update({
+  id: '/api/site-unlock',
+  path: '/api/site-unlock',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiStorageCheckRoute = ApiStorageCheckRouteImport.update({
@@ -155,6 +161,7 @@ export interface FileRoutesByFullPath {
   '/api/chat-image': typeof ApiChatImageRouteWithChildren
   '/api/exam-image': typeof ApiExamImageRouteWithChildren
   '/api/exam-leave': typeof ApiExamLeaveRoute
+  '/api/site-unlock': typeof ApiSiteUnlockRoute
   '/api/storage-check': typeof ApiStorageCheckRoute
   '/chat/$id': typeof ChatIdRoute
   '/exams/$id': typeof ExamsIdRoute
@@ -179,6 +186,7 @@ export interface FileRoutesByTo {
   '/api/chat-image': typeof ApiChatImageRouteWithChildren
   '/api/exam-image': typeof ApiExamImageRouteWithChildren
   '/api/exam-leave': typeof ApiExamLeaveRoute
+  '/api/site-unlock': typeof ApiSiteUnlockRoute
   '/api/storage-check': typeof ApiStorageCheckRoute
   '/chat/$id': typeof ChatIdRoute
   '/exams/$id': typeof ExamsIdRoute
@@ -204,6 +212,7 @@ export interface FileRoutesById {
   '/api/chat-image': typeof ApiChatImageRouteWithChildren
   '/api/exam-image': typeof ApiExamImageRouteWithChildren
   '/api/exam-leave': typeof ApiExamLeaveRoute
+  '/api/site-unlock': typeof ApiSiteUnlockRoute
   '/api/storage-check': typeof ApiStorageCheckRoute
   '/chat/$id': typeof ChatIdRoute
   '/exams/$id': typeof ExamsIdRoute
@@ -230,6 +239,7 @@ export interface FileRouteTypes {
     | '/api/chat-image'
     | '/api/exam-image'
     | '/api/exam-leave'
+    | '/api/site-unlock'
     | '/api/storage-check'
     | '/chat/$id'
     | '/exams/$id'
@@ -254,6 +264,7 @@ export interface FileRouteTypes {
     | '/api/chat-image'
     | '/api/exam-image'
     | '/api/exam-leave'
+    | '/api/site-unlock'
     | '/api/storage-check'
     | '/chat/$id'
     | '/exams/$id'
@@ -278,6 +289,7 @@ export interface FileRouteTypes {
     | '/api/chat-image'
     | '/api/exam-image'
     | '/api/exam-leave'
+    | '/api/site-unlock'
     | '/api/storage-check'
     | '/chat/$id'
     | '/exams/$id'
@@ -303,6 +315,7 @@ export interface RootRouteChildren {
   ApiChatImageRoute: typeof ApiChatImageRouteWithChildren
   ApiExamImageRoute: typeof ApiExamImageRouteWithChildren
   ApiExamLeaveRoute: typeof ApiExamLeaveRoute
+  ApiSiteUnlockRoute: typeof ApiSiteUnlockRoute
   ApiStorageCheckRoute: typeof ApiStorageCheckRoute
   ChatIdRoute: typeof ChatIdRoute
   ExamsIdRoute: typeof ExamsIdRoute
@@ -382,6 +395,13 @@ declare module '@tanstack/react-router' {
       path: '/api/exam-leave'
       fullPath: '/api/exam-leave'
       preLoaderRoute: typeof ApiExamLeaveRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/site-unlock': {
+      id: '/api/site-unlock'
+      path: '/api/site-unlock'
+      fullPath: '/api/site-unlock'
+      preLoaderRoute: typeof ApiSiteUnlockRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/storage-check': {
@@ -539,6 +559,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiChatImageRoute: ApiChatImageRouteWithChildren,
   ApiExamImageRoute: ApiExamImageRouteWithChildren,
   ApiExamLeaveRoute: ApiExamLeaveRoute,
+  ApiSiteUnlockRoute: ApiSiteUnlockRoute,
   ApiStorageCheckRoute: ApiStorageCheckRoute,
   ChatIdRoute: ChatIdRoute,
   ExamsIdRoute: ExamsIdRoute,
